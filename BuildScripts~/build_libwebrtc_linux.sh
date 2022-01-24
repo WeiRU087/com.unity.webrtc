@@ -33,6 +33,9 @@ do
   for is_debug in "true" "false"
   do
     args="is_debug=${is_debug} target_os=\"linux\" target_cpu=\"${target_cpu}\" rtc_include_tests=false rtc_build_examples=false proprietary_codecs=true ffmpeg_branding=\"Chrome\" rtc_use_h264=true symbol_level=0 enable_iterator_debugging=false is_component_build=false use_rtti=true rtc_use_x11=false libcxx_abi_unstable=false";
+    # if [ $is_debug = "true" ]; then
+    #   args="${args} is_asan=true is_lsan=true";
+    # fi
 
     # generate ninja files
     gn gen "$OUTPUT_DIR" --root="src" --args="${args}"
