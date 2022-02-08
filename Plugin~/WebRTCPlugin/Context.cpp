@@ -18,6 +18,8 @@
 #include "UnityVideoDecoderFactory.h"
 #include "UnityVideoTrackSource.h"
 
+#include "api/task_queue/default_task_queue_factory.h"
+
 using namespace ::webrtc;
 
 namespace unity
@@ -184,6 +186,7 @@ namespace webrtc
         : m_uid(uid)
         , m_workerThread(rtc::Thread::CreateWithSocketServer())
         , m_signalingThread(rtc::Thread::CreateWithSocketServer())
+        , m_taskQueueFactory(CreateDefaultTaskQueueFactory())
         , m_encoderType(encoderType)
     {
         m_workerThread->Start();
@@ -191,11 +194,11 @@ namespace webrtc
 
         rtc::InitializeSSL();
 
-        m_workerThread->Invoke<void>(
-            RTC_FROM_HERE,
-            [this]()
+        m_audioDevice = m_workerThread->Invoke<rtc::scoped_refptr<DummyAudioDevice>>(
+            RTC_FROM_HERE, [&]()
             {
-                m_audioDevice = new rtc::RefCountedObject<DummyAudioDevice>();
+                return new rtc::RefCountedObject<DummyAudioDevice>(
+                    m_taskQueueFactory.get());
             });
 
         std::unique_ptr<webrtc::VideoEncoderFactory> videoEncoderFactory =
@@ -413,37 +416,22 @@ namespace webrtc
     {
         const rtc::scoped_refptr<AudioTrackInterface> track =
             m_peerConnectionFactory->CreateAudioTrack(label, source);
-
         AddRefPtr(track);
         return track;
     }
 
 
-    void Context::RegisterAudioReceiveCallback(
-        AudioTrackInterface* track, DelegateAudioReceive callback)
+    AudioTrackSinkAdapter* Context::CreateAudioTrackSinkAdapter()
     {
-        if (m_mapAudioTrackAndSink.find(track) != m_mapAudioTrackAndSink.end())
-        {
-            RTC_LOG(LS_WARNING) << "The callback is already registered.";
-            return;
-        }
-
-        std::unique_ptr<AudioTrackSinkAdapter> sink =
-            std::make_unique<AudioTrackSinkAdapter>(track, callback);
-
-        track->AddSink(sink.get());
-        m_mapAudioTrackAndSink[track] = std::move(sink);
+        auto sink = std::make_unique<AudioTrackSinkAdapter>();
+        AudioTrackSinkAdapter* ptr = sink.get();
+        m_mapAudioTrackAndSink.emplace(ptr, std::move(sink));
+        return ptr;
     }
 
-    void Context::UnregisterAudioReceiveCallback(
-        AudioTrackInterface* track)
+    void Context::DeleteAudioTrackSinkAdapter(AudioTrackSinkAdapter* sink)
     {
-        if (m_mapAudioTrackAndSink.find(track) == m_mapAudioTrackAndSink.end())
-            return;
-
-        AudioTrackSinkInterface* sink = m_mapAudioTrackAndSink[track].get();
-        track->RemoveSink(sink);
-        m_mapAudioTrackAndSink.erase(track);
+        m_mapAudioTrackAndSink.erase(sink);
     }
 
     void Context::AddStatsReport(const rtc::scoped_refptr<const webrtc::RTCStatsReport>& report)

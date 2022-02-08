@@ -483,11 +483,12 @@ namespace Unity.WebRTC
         /// <param name="height"></param>
         /// <param name="platform"></param>
         /// <param name="encoderType"></param>
-        public static void ValidateTextureSize(int width, int height, RuntimePlatform platform, EncoderType encoderType)
+        /// <returns></returns>
+        public static RTCError ValidateTextureSize(int width, int height, RuntimePlatform platform, EncoderType encoderType)
         {
             if (!s_limitTextureSize)
             {
-                return;
+                return new RTCError {errorType = RTCErrorType.None};
             }
 
             // Check NVCodec capabilities
@@ -503,11 +504,14 @@ namespace Unity.WebRTC
                 if (width < minWidth || maxWidth < width ||
                     height < minHeight || maxHeight < height)
                 {
-                    throw new ArgumentException(
-                        $"Texture size is invalid. " +
-                        $"minWidth:{minWidth}, maxWidth:{maxWidth} " +
-                        $"minHeight:{minHeight}, maxHeight:{maxHeight} " +
-                        $"current size width:{width} height:{height}");
+                    return new RTCError
+                    {
+                        errorType = RTCErrorType.InvalidRange,
+                        message = $"Texture size is invalid. " +
+                                  $"minWidth:{minWidth}, maxWidth:{maxWidth} " +
+                                  $"minHeight:{minHeight}, maxHeight:{maxHeight} " +
+                                  $"current size width:{width} height:{height}"
+                    };
                 }
             }
 
@@ -517,10 +521,16 @@ namespace Unity.WebRTC
                 const int minimumTextureSize = 114;
                 if (width < minimumTextureSize || height < minimumTextureSize)
                 {
-                    throw new ArgumentException(
-                        $"Texture size need {minimumTextureSize}, current size width:{width} height:{height}");
+                    return new RTCError
+                    {
+                        errorType = RTCErrorType.InvalidRange,
+                        message =
+                            $"Texture size need {minimumTextureSize}, current size width:{width} height:{height}"
+                    };
                 }
             }
+
+            return new RTCError {errorType = RTCErrorType.None};
         }
 
         /// <summary>
@@ -807,9 +817,7 @@ namespace Unity.WebRTC
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeMediaStreamOnRemoveTrack(IntPtr stream, IntPtr track);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    internal delegate void DelegateAudioReceive(
-        IntPtr track, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] float[] audioData, int size,
-        int sampleRate, int numOfChannels, int numOfFrames);
+    internal delegate void DelegateAudioReceive(IntPtr ptr);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateVideoFrameResize(IntPtr renderer, int width, int height);
 
@@ -1040,9 +1048,16 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern void ContextUnRegisterMediaStreamObserver(IntPtr ctx, IntPtr stream);
         [DllImport(WebRTC.Lib)]
-        public static extern void ContextRegisterAudioReceiveCallback(IntPtr context, IntPtr track, DelegateAudioReceive callback);
+        public static extern IntPtr ContextCreateAudioTrackSink(IntPtr context);
         [DllImport(WebRTC.Lib)]
-        public static extern void ContextUnregisterAudioReceiveCallback(IntPtr context, IntPtr track);
+        public static extern void ContextDeleteAudioTrackSink(IntPtr context, IntPtr sink);
+        [DllImport(WebRTC.Lib)]
+        public static extern void AudioTrackAddSink(IntPtr track, IntPtr sink);
+        [DllImport(WebRTC.Lib)]
+        public static extern void AudioTrackRemoveSink(IntPtr track, IntPtr sink);
+        [DllImport(WebRTC.Lib)]
+        public static extern void AudioTrackSinkProcessAudio(
+            IntPtr sink, float[] data, int length, int channels, int sampleRate);
         [DllImport(WebRTC.Lib)]
         public static extern EncoderType ContextGetEncoderType(IntPtr context);
         [DllImport(WebRTC.Lib)]

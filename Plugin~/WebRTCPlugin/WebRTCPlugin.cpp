@@ -105,7 +105,9 @@ namespace webrtc
             return *this;
         }
 
+        #if defined(__clang__) || defined(__GNUC__)
         __attribute__((optnone))
+        #endif
         explicit operator const absl::optional<T>&() const
         {
             absl::optional<T> dst = absl::nullopt;
@@ -583,7 +585,7 @@ extern "C"
     }
 
 
-    const std::map<std::string, byte> statsTypes =
+    const std::map<std::string, uint32_t> statsTypes =
     {
         { "codec", 0 },
         { "inbound-rtp", 1 },
@@ -608,11 +610,11 @@ extern "C"
         { "ice-server", 20 }
     };
 
-    UNITY_INTERFACE_EXPORT const RTCStats** StatsReportGetStatsList(const RTCStatsReport* report, size_t* length, byte** types)
+    UNITY_INTERFACE_EXPORT const RTCStats** StatsReportGetStatsList(const RTCStatsReport* report, size_t* length, uint32_t** types)
     {
         const size_t size = report->size();
         *length = size;
-        *types = static_cast<byte*>(CoTaskMemAlloc(sizeof(byte) * size));
+        *types = static_cast<uint32_t*>(CoTaskMemAlloc(sizeof(uint32_t) * size));
         void* buf = CoTaskMemAlloc(sizeof(RTCStats*) * size);
         const RTCStats** ret = static_cast<const RTCStats**>(buf);
         if(size == 0)
@@ -649,7 +651,7 @@ extern "C"
         return ConvertString(stats->id());
     }
 
-    UNITY_INTERFACE_EXPORT byte StatsGetType(const RTCStats* stats)
+    UNITY_INTERFACE_EXPORT uint32_t StatsGetType(const RTCStats* stats)
     {
         return statsTypes.at(stats->type());
     }
@@ -686,7 +688,7 @@ extern "C"
 
     UNITY_INTERFACE_EXPORT int64_t StatsMemberGetLong(const RTCStatsMemberInterface* member)
     {
-        return *member->cast_to<::webrtc::RTCStatsMember<uint64_t>>();
+        return *member->cast_to<::webrtc::RTCStatsMember<int64_t>>();
     }
 
     UNITY_INTERFACE_EXPORT uint64_t StatsMemberGetUnsignedLong(const RTCStatsMemberInterface* member)
@@ -1447,16 +1449,36 @@ extern "C"
         }
     }
 
-    UNITY_INTERFACE_EXPORT void ContextRegisterAudioReceiveCallback(
-        Context* context, AudioTrackInterface* track, DelegateAudioReceive callback)
+    UNITY_INTERFACE_EXPORT AudioTrackSinkAdapter* ContextCreateAudioTrackSink(
+        Context* context)
     {
-        context->RegisterAudioReceiveCallback(track, callback);
+        return context->CreateAudioTrackSinkAdapter();
     }
 
-    UNITY_INTERFACE_EXPORT void ContextUnregisterAudioReceiveCallback(
-        Context* context, AudioTrackInterface* track)
+    UNITY_INTERFACE_EXPORT void ContextDeleteAudioTrackSink(
+        Context* context, AudioTrackSinkAdapter* sink)
     {
-        context->UnregisterAudioReceiveCallback(track);
+        return context->DeleteAudioTrackSinkAdapter(sink);
+    }
+
+    UNITY_INTERFACE_EXPORT void AudioTrackAddSink(
+        AudioTrackInterface* track, AudioTrackSinkInterface* sink)
+    {
+        track->AddSink(sink);
+    }
+
+    UNITY_INTERFACE_EXPORT void AudioTrackRemoveSink(
+        AudioTrackInterface* track, AudioTrackSinkInterface* sink)
+    {
+        track->RemoveSink(sink);
+    }
+
+    UNITY_INTERFACE_EXPORT void AudioTrackSinkProcessAudio(
+        AudioTrackSinkAdapter* sink, float* data, size_t length,
+        int channels, int sampleRate)
+    {
+        sink->ProcessAudio(
+            data, length, channels, sampleRate);
     }
 }
 
