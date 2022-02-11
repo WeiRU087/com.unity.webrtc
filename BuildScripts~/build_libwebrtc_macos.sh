@@ -46,7 +46,9 @@ do
       target_cpu=\"${target_cpu}\" \
       rtc_include_tests=false \
       rtc_build_examples=false \
-      rtc_use_h264=false \
+      proprietary_codecs=true \
+      ffmpeg_branding=\"Chrome\" \
+      rtc_use_h264=true \
       symbol_level=0 \
       enable_iterator_debugging=false \
       is_component_build=false \
