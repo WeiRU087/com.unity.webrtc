@@ -1,8 +1,8 @@
 @echo off
 
-if not exist depot_tools (
-  git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
-)
+rem if not exist depot_tools (
+rem   git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+rem )
 
 set COMMAND_DIR=%~dp0
 set PATH=%cd%\depot_tools;%PATH%
@@ -17,8 +17,8 @@ set PYPI_URL=https://artifactory.prd.it.unity3d.com/artifactory/api/pypi/pypi/si
 set vs2019_install=C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional
 
 if not exist src (
-  powershell -Command "get-content depot_tools\update_depot_tools.bat | foreach-object {$_ -replace \"origin/master\",\"origin/main\"} | add-content depot_tools\update_depot_tools.bat.edited"
-  move /Y depot_tools\update_depot_tools.bat.edited depot_tools\update_depot_tools.bat
+  rem powershell -Command "get-content depot_tools\update_depot_tools.bat | foreach-object {$_ -replace \"origin/master\",\"origin/main\"} | add-content depot_tools\update_depot_tools.bat.edited"
+  rem move /Y depot_tools\update_depot_tools.bat.edited depot_tools\update_depot_tools.bat
   call fetch.bat --nohooks webrtc
   cd src
   call git.bat config --system core.longpaths true
@@ -31,7 +31,7 @@ rem add jsoncpp
 patch -N "src\BUILD.gn" < "%COMMAND_DIR%\patches\add_jsoncpp.patch"
 
 rem install pywin32
-call "%cd%\depot_tools\bootstrap-3_8_0_chromium_8_bin\python\bin\python.exe" ^
+call "D:\depot_tools\bootstrap-2@3_8_10_chromium_20_bin\python\bin\python.exe" ^
   -m pip install pywin32 --index-url "%PYPI_URL%" --upgrade
 
 mkdir "%ARTIFACTS_DIR%\lib"
@@ -44,7 +44,7 @@ for %%i in (x64) do (
 
     rem generate ninja for release
     call gn.bat gen %OUTPUT_DIR% --root="src" ^
-      --args="is_debug=%%j is_clang=false target_cpu=\"%%i\" rtc_include_tests=false rtc_build_examples=false rtc_use_h264=false symbol_level=0 enable_iterator_debugging=false"
+      --args="is_debug=%%j is_clang=true target_cpu=\"%%i\" use_custom_libcxx=false rtc_include_tests=false rtc_build_examples=false proprietary_codecs=true ffmpeg_branding=\"Chrome\" rtc_use_h264=true symbol_level=0 enable_iterator_debugging=false"
 
     rem build
     ninja.exe -C %OUTPUT_DIR%
