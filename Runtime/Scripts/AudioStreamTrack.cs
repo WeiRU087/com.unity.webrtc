@@ -137,6 +137,10 @@ namespace Unity.WebRTC
             internal void WriteToAudioClip(int numOfFrames = 1)
             {
                 var clip = m_audioSource.clip;
+                if (clip.samples == 0)
+                {
+                    return;
+                }
                 int baseOffset = (int)(m_bufInfo.BufferPosition % clip.samples);
                 int writtenSamples = 0;
 
