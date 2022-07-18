@@ -53,6 +53,38 @@ namespace Unity.WebRTC
 
         void Update()
         {
+            if (clip == null)
+            {
+                if (source == null)
+                {
+                    source = GetComponent<AudioSource>();
+                    if (source == null)
+                    {
+                        return;
+                    }
+                }
+
+                if (source.clip == null)
+                {
+                    return;
+                }
+
+                if (source.clip.channels != channels || source.clip.frequency != sampleRate)
+                {
+                    Debug.LogWarning("麦克风：设备通道及采样率 与原设备不一致");
+                    return;
+                }
+                clip = source.clip;
+                channels = clip.channels;
+                sampleRate = clip.frequency;
+                prevTimeSamples = 0;
+            }
+
+            if (!source.isPlaying)
+            {
+                Debug.Log("AudioSourceRead:  source is not Playing");
+                return;
+            }
             var timeSamples= source.timeSamples;
             if (timeSamples == prevTimeSamples)
                 return;
