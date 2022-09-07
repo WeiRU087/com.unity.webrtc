@@ -2,12 +2,15 @@
 
 #include <mutex>
 
-using namespace ::webrtc;
+#include <api/media_stream_interface.h>
+#include <pc/local_audio_source.h>
 
 namespace unity
 {
 namespace webrtc
 {
+    using namespace ::webrtc;
+
     class UnityAudioTrackSource : public LocalAudioSource
     {
     public:
@@ -19,7 +22,6 @@ namespace webrtc
         void RemoveSink(AudioTrackSinkInterface* sink) override;
 
         void PushAudioData(const float* pAudioData, int nSampleRate, size_t nNumChannels, size_t nNumFrames);
-        void SendAudioData(int nSampleRate, size_t nNumChannels);
 
     protected:
         UnityAudioTrackSource();
@@ -29,10 +31,12 @@ namespace webrtc
 
     private:
         std::vector<int16_t> _convertedAudioData;
-        std::vector <AudioTrackSinkInterface*> _arrSink;
+        std::vector<AudioTrackSinkInterface*> _arrSink;
         std::mutex _mutex;
         cricket::AudioOptions _options;
-        bool _bufferInit = false;
+        int _sampleRate = 0;
+        size_t _numChannels = 0;
+        size_t _numFrames = 0;
     };
 } // end namespace webrtc
 } // end namespace unity

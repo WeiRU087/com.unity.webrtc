@@ -14,6 +14,7 @@ class BandwidthSample : MonoBehaviour
 #pragma warning disable 0649
     [SerializeField] private Dropdown bandwidthSelector;
     [SerializeField] private Dropdown scaleResolutionDownSelector;
+    [SerializeField] private Dropdown framerateSelector;
     [SerializeField] private Button callButton;
     [SerializeField] private Button hangUpButton;
     [SerializeField] private InputField statsField;
@@ -37,9 +38,11 @@ class BandwidthSample : MonoBehaviour
     private DelegateOnNegotiationNeeded pc1OnNegotiationNeeded;
     private bool videoUpdateStarted;
 
-    private Dictionary<string, ulong?> bandwidthOptions = new Dictionary<string, ulong?>()
+    private Dictionary<string, ulong?> bandwidthOptions =
+        new Dictionary<string, ulong?>()
     {
         { "undefined", null },
+        { "10000", 10000 },
         { "2000", 2000 },
         { "1000", 1000 },
         { "500",  500 },
@@ -47,7 +50,8 @@ class BandwidthSample : MonoBehaviour
         { "125",  125 },
     };
 
-    private Dictionary<string, double> scaleResolutionDownOptions = new Dictionary<string, double>()
+    private Dictionary<string, double> scaleResolutionDownOptions =
+        new Dictionary<string, double>()
     {
         { "Not scaling", 1.0f },
         { "Down scale by 2.0", 2.0f },
@@ -56,12 +60,22 @@ class BandwidthSample : MonoBehaviour
         { "Down scale by 16.0", 16.0f }
     };
 
-    private const int width = 1280;
-    private const int height = 720;
+    private Dictionary<string, uint?> framerateOptions =
+        new Dictionary<string, uint?>
+    {
+        { "undefined", null },
+        { "90", 90 },
+        { "60", 60 },
+        { "30", 30 },
+        { "20", 20 },
+        { "10", 10 },
+        { "5", 5 },
+        { "0", 0 },
+    };
 
     private void Awake()
     {
-        WebRTC.Initialize(WebRTCSettings.EncoderType, WebRTCSettings.LimitTextureSize);
+        WebRTC.Initialize(WebRTCSettings.LimitTextureSize);
         bandwidthSelector.options = bandwidthOptions
             .Select(pair => new Dropdown.OptionData{text = pair.Key })
             .ToList();
@@ -70,6 +84,11 @@ class BandwidthSample : MonoBehaviour
             .Select(pair => new Dropdown.OptionData { text = pair.Key })
             .ToList();
         scaleResolutionDownSelector.onValueChanged.AddListener(ChangeScaleResolutionDown);
+
+        framerateSelector.options = framerateOptions
+            .Select(pair => new Dropdown.OptionData { text = pair.Key })
+            .ToList();
+        framerateSelector.onValueChanged.AddListener(ChangeFramerate);
 
         callButton.onClick.AddListener(Call);
         hangUpButton.onClick.AddListener(HangUp);
@@ -198,6 +217,18 @@ class BandwidthSample : MonoBehaviour
             pc1Senders.Add(_pc1.AddTrack(track, videoStream));
         }
 
+        if (WebRTCSettings.UseVideoCodec != null)
+        {
+            var codecs = new[] {WebRTCSettings.UseVideoCodec};
+            foreach (var transceiver in _pc1.GetTransceivers())
+            {
+                if (pc1Senders.Contains(transceiver.Sender))
+                {
+                    transceiver.SetCodecPreferences(codecs);
+                }
+            }
+        }
+
         if (!videoUpdateStarted)
         {
             StartCoroutine(WebRTC.Update());
@@ -247,7 +278,7 @@ class BandwidthSample : MonoBehaviour
 
         if (videoStream == null)
         {
-            videoStream = cam.CaptureStream(width, height, 1000000);
+            videoStream = cam.CaptureStream(WebRTCSettings.StreamSize.x, WebRTCSettings.StreamSize.y, 1000000);
         }
         sourceImage.texture = cam.targetTexture;
         sourceImage.color = Color.white;
@@ -273,10 +304,12 @@ class BandwidthSample : MonoBehaviour
             parameters.encodings[0].minBitrate = bandwidth * 1000;
         }
 
-        RTCErrorType error = sender.SetParameters(parameters);
-        if (error != RTCErrorType.None)
+        RTCError error = sender.SetParameters(parameters);
+        if (error.errorType != RTCErrorType.None)
         {
-            Debug.LogErrorFormat("RTCRtpSender.SetParameters failed {0}", error);
+            Debug.LogErrorFormat("RTCRtpSender.SetParameters failed {0}", error.errorType);
+            statsField.text += $"Failed change bandwidth to {bandwidth * 1000}{Environment.NewLine}";
+            bandwidthSelector.value = 0;
         }
     }
 
@@ -289,10 +322,33 @@ class BandwidthSample : MonoBehaviour
         RTCRtpSendParameters parameters = sender.GetParameters();
         parameters.encodings[0].scaleResolutionDownBy = scale;
 
-        RTCErrorType error = sender.SetParameters(parameters);
-        if (error != RTCErrorType.None)
+        RTCError error = sender.SetParameters(parameters);
+        if (error.errorType != RTCErrorType.None)
         {
-            Debug.LogErrorFormat("RTCRtpSender.SetParameters failed {0}", error);
+            Debug.LogErrorFormat("RTCRtpSender.SetParameters failed {0}", error.errorType);
+            statsField.text +=
+                $"Failed scale down video resolution to " +
+                $"{(int)(WebRTCSettings.StreamSize.x / scale)}x{(int)(WebRTCSettings.StreamSize.y / scale)}{Environment.NewLine}";
+            scaleResolutionDownSelector.value = 0;
+        }
+    }
+
+    private void ChangeFramerate(int index)
+    {
+        if (_pc1 == null || _pc2 == null)
+            return;
+        uint? framerate = framerateOptions.Values.ElementAt(index);
+        RTCRtpSender sender = _pc1.GetSenders().First();
+        RTCRtpSendParameters parameters = sender.GetParameters();
+        parameters.encodings[0].maxFramerate = framerate;
+        RTCError error = sender.SetParameters(parameters);
+        if (error.errorType != RTCErrorType.None)
+        {
+            Debug.LogErrorFormat("RTCRtpSender.SetParameters failed {0}", error.errorType);
+            statsField.text +=
+                $"Failed maxFramerate to " +
+                $"{framerate}{Environment.NewLine}";
+            framerateSelector.value = 0;
         }
     }
 

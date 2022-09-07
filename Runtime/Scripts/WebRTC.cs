@@ -6,19 +6,10 @@ using System.Threading;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using Object = UnityEngine.Object;
 
 namespace Unity.WebRTC
 {
-    /// <summary>
-    ///
-    /// </summary>
-    /// <seealso cref="WebRTC.Initialize(EncoderType)"/>
-    public enum EncoderType
-    {
-        Software = 0,
-        Hardware = 1
-    }
-
     /// <summary>
     ///
     /// </summary>
@@ -299,19 +290,6 @@ namespace Unity.WebRTC
         public OptionalBool enableDtlsSrtp;
     }
 
-    /// <summary>
-    ///
-    /// </summary>
-    public enum CodecInitializationResult
-    {
-        NotInitialized,
-        Success,
-        DriverNotInstalled,
-        DriverVersionDoesNotSupportAPI,
-        APINotFound,
-        EncoderInitializationFailed
-    }
-
     public enum NativeLoggingSeverity
     {
         LS_VERBOSE,
@@ -351,18 +329,12 @@ namespace Unity.WebRTC
         /// </summary>
         /// <param name="type"></param>
         /// <param name="limitTextureSize"></param>
-        public static void Initialize(EncoderType type = EncoderType.Hardware, bool limitTextureSize = true, bool enableNativeLog = false,
+        public static void Initialize(bool limitTextureSize = true, bool enableNativeLog = false,
             NativeLoggingSeverity nativeLoggingSeverity = NativeLoggingSeverity.LS_INFO)
         {
             if (s_context != null)
                 throw new InvalidOperationException("Already initialized WebRTC.");
 
-            Initialize(type, limitTextureSize, false, enableNativeLog, nativeLoggingSeverity);
-        }
-
-
-        internal static void Initialize(EncoderType type, bool limitTextureSize, bool forTest, bool enableNativeLog = false, NativeLoggingSeverity nativeLoggingSeverity = NativeLoggingSeverity.LS_INFO)
-        {
             // todo(kazuki): Add this event to avoid crash caused by hot-reload.
             // Dispose of all before reloading assembly.
 #if UNITY_EDITOR
@@ -392,7 +364,7 @@ namespace Unity.WebRTC
 #if UNITY_IOS && !UNITY_EDITOR
             NativeMethods.RegisterRenderingWebRTCPlugin();
 #endif
-            s_context = Context.Create(encoderType:type, forTest:forTest);
+            s_context = Context.Create();
             NativeMethods.SetCurrentContext(s_context.self);
 
             // Initialize a custom invokable synchronization context to wrap the main thread UnitySynchronizationContext
@@ -413,11 +385,15 @@ namespace Unity.WebRTC
         /// <returns></returns>
         public static IEnumerator Update()
         {
+            var instruction = new WaitForEndOfFrame();
+
             while (true)
             {
                 // Wait until all frame rendering is done
-                yield return new WaitForEndOfFrame();
+                yield return instruction;
                 {
+                    var tempTextureActive = RenderTexture.active;
+                    RenderTexture.active = null;
                     foreach (var reference in VideoStreamTrack.s_tracks.Values)
                     {
                         if (!reference.TryGetTarget(out var track))
@@ -425,6 +401,7 @@ namespace Unity.WebRTC
                         track.UpdateSendTexture();
                         track.UpdateReceiveTexture();
                     }
+                    RenderTexture.active = tempTextureActive;
                 }
             }
         }
@@ -470,30 +447,39 @@ namespace Unity.WebRTC
         /// <summary>
         ///
         /// </summary>
-        /// <returns></returns>
-        public static EncoderType GetEncoderType()
-        {
-            return s_context.GetEncoderType();
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
         /// <param name="width"></param>
         /// <param name="height"></param>
         /// <param name="platform"></param>
         /// <param name="encoderType"></param>
-        public static void ValidateTextureSize(int width, int height, RuntimePlatform platform, EncoderType encoderType)
+        /// <returns></returns>
+        public static RTCError ValidateTextureSize(int width, int height, RuntimePlatform platform)
         {
             if (!s_limitTextureSize)
             {
-                return;
+                return new RTCError {errorType = RTCErrorType.None};
+            }
+
+            const int maxPixelCount = 3840 * 2160;
+
+            // Using codec is determined when the Encoder initialization process.
+            // Therefore, it is not possible to limit the resolution before that. (supported resolutions depend on the codec and its profile.)
+            // For workaround, all 4k resolutions and above are considered as errors.
+            // (Because under 4k resolution is almost supported by the supported codecs.)
+            // todo: Resize the texture size when encoder initialization process, or fall back to another encoder.
+            if (width * height > maxPixelCount)
+            {
+                return new RTCError
+                {
+                    errorType = RTCErrorType.InvalidRange,
+                    message = $"Texture pixel count is invalid. " +
+                              $"width:{width} x height:{height} is over 4k pixel count ({maxPixelCount})."
+                };
             }
 
             // Check NVCodec capabilities
             // todo(kazuki):: The constant values should be replaced by values that are got from NvCodec API.
             // Use "nvEncGetEncodeCaps" function which is provided by the NvCodec API.
-            if (encoderType == EncoderType.Hardware && NvEncSupportedPlatdorm(platform))
+            if (NvEncSupportedPlatdorm(platform))
             {
                 const int minWidth = 145;
                 const int maxWidth = 4096;
@@ -503,11 +489,14 @@ namespace Unity.WebRTC
                 if (width < minWidth || maxWidth < width ||
                     height < minHeight || maxHeight < height)
                 {
-                    throw new ArgumentException(
-                        $"Texture size is invalid. " +
-                        $"minWidth:{minWidth}, maxWidth:{maxWidth} " +
-                        $"minHeight:{minHeight}, maxHeight:{maxHeight} " +
-                        $"current size width:{width} height:{height}");
+                    return new RTCError
+                    {
+                        errorType = RTCErrorType.InvalidRange,
+                        message = $"Texture size is invalid. " +
+                                  $"minWidth:{minWidth}, maxWidth:{maxWidth} " +
+                                  $"minHeight:{minHeight}, maxHeight:{maxHeight} " +
+                                  $"current size width:{width} height:{height}"
+                    };
                 }
             }
 
@@ -517,10 +506,16 @@ namespace Unity.WebRTC
                 const int minimumTextureSize = 114;
                 if (width < minimumTextureSize || height < minimumTextureSize)
                 {
-                    throw new ArgumentException(
-                        $"Texture size need {minimumTextureSize}, current size width:{width} height:{height}");
+                    return new RTCError
+                    {
+                        errorType = RTCErrorType.InvalidRange,
+                        message =
+                            $"Texture size need {minimumTextureSize}, current size width:{width} height:{height}"
+                    };
                 }
             }
+
+            return new RTCError {errorType = RTCErrorType.None};
         }
 
         /// <summary>
@@ -636,9 +631,19 @@ namespace Unity.WebRTC
             }
             return false;
         }
-        internal static void DestroyOnMainThread(UnityEngine.Object obj)
+        internal static void DestroyOnMainThread(UnityEngine.Object obj, float delay = 0f)
         {
-            s_syncContext.Post(DestroyImmediate, obj);
+            if (delay < 0f)
+                throw new ArgumentException($"The delay value is smaller than zero. delay:{delay}");
+            if(Mathf.Approximately(delay, 0f))
+                s_syncContext.Post(DestroyImmediate, obj);
+            else
+                s_syncContext.Post(Destroy, Tuple.Create(obj, delay));
+        }
+
+        internal static void DelayActionOnMainThread(Action callback, float delay)
+        {
+            s_syncContext.Post(DelayAction, Tuple.Create(callback, delay));
         }
 
         internal static void Sync(IntPtr ptr, Action callback)
@@ -666,6 +671,29 @@ namespace Unity.WebRTC
             UnityEngine.Object.DestroyImmediate(obj);
         }
 
+        static void Destroy(object state)
+        {
+            (UnityEngine.Object obj, float delay) = state as Tuple<UnityEngine.Object, float>;
+
+            if (!Application.isPlaying)
+            {
+                UnityEngine.Object.DestroyImmediate(obj);
+                return;
+            }
+            UnityEngine.Object.Destroy(obj, delay);
+        }
+
+        static void DelayAction(object state)
+        {
+            (Action callback, float delay)  = state as Tuple<Action, float>;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                int milliseconds = (int)(delay * 1000f);
+                Thread.Sleep(milliseconds);
+                callback();
+            });
+        }
+
 
         internal static IEnumerable<T> Deserialize<T>(IntPtr buf, int length, Func<IntPtr, T> constructor) where T : class
         {
@@ -687,8 +715,17 @@ namespace Unity.WebRTC
         {
             if (Context.table.ContainsKey(ptr))
             {
-                if(Context.table[ptr] is T value)
+                if (Context.table[ptr] == null)
+                {
+                    // The object has been garbage collected.
+                    // But the finalizer has not been called.
+                    Context.table.Remove(ptr);
+                    return constructor(ptr);
+                }
+                if (Context.table[ptr] is T value)
+                {
                     return value;
+                }
                 throw new InvalidCastException($"{ptr} is not {typeof(T).Name}");
             }
             else
@@ -705,41 +742,6 @@ namespace Unity.WebRTC
 
         internal static Context Context { get { return s_context; } }
         internal static WeakReferenceTable Table { get { return s_context?.table; } }
-
-        // avoid crash when call GetHardwareEncoderSupport using OpenGL graphics on Win/Mac
-        public static bool HardwareEncoderSupport()
-        {
-            // OpenGL APIs on windows/osx are not supported
-            if (Application.platform == RuntimePlatform.WindowsEditor ||
-                Application.platform == RuntimePlatform.WindowsPlayer ||
-                Application.platform == RuntimePlatform.OSXEditor ||
-                Application.platform == RuntimePlatform.OSXPlayer)
-            {
-                if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore ||
-                    SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES2 ||
-                    SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3)
-                {
-                    return false;
-                }
-            }
-
-            return NativeMethods.GetHardwareEncoderSupport();
-        }
-
-        /// <summary>
-        /// Not implement this property.
-        /// Please check each track about initialization. (VideoStreamTrack.IsInitialized)
-        /// This property will be removed next major version up.
-        /// </summary>
-        /// <exception cref="NotImplementedException"></exception>
-        [Obsolete("Use 'VideoStreamTrack.IsInitialized' instead.", true)]
-        public static CodecInitializationResult CodecInitializationResult
-        {
-            get
-            {
-                throw new NotImplementedException("This property is obsoleted. Please use VideoStreamTrack.IsInitialized instead of this");
-            }
-        }
 
         public static IReadOnlyList<WeakReference<RTCPeerConnection>> PeerList
         {
@@ -807,9 +809,7 @@ namespace Unity.WebRTC
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeMediaStreamOnRemoveTrack(IntPtr stream, IntPtr track);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    internal delegate void DelegateAudioReceive(
-        IntPtr track, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] float[] audioData, int size,
-        int sampleRate, int numOfChannels, int numOfFrames);
+    internal delegate void DelegateAudioReceive(IntPtr ptr);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateVideoFrameResize(IntPtr renderer, int width, int height);
 
@@ -820,13 +820,10 @@ namespace Unity.WebRTC
         public static extern void RegisterRenderingWebRTCPlugin();
 #endif
         [DllImport(WebRTC.Lib)]
-        [return: MarshalAs(UnmanagedType.U1)]
-        public static extern bool GetHardwareEncoderSupport();
-        [DllImport(WebRTC.Lib)]
         public static extern void RegisterDebugLog(DelegateDebugLog func, [MarshalAs(UnmanagedType.U1)] bool enableNativeLog,
             NativeLoggingSeverity nativeLoggingSeverity);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr ContextCreate(int uid, EncoderType encoderType, [MarshalAs(UnmanagedType.U1)] bool forTest);
+        public static extern IntPtr ContextCreate(int uid);
         [DllImport(WebRTC.Lib)]
         public static extern void ContextDestroy(int uid);
         [DllImport(WebRTC.Lib)]
@@ -858,13 +855,9 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern void ContextDeleteStatsReport(IntPtr context, IntPtr report);
         [DllImport(WebRTC.Lib)]
-        public static extern void ContextSetVideoEncoderParameter(IntPtr context, IntPtr track, int width, int height, GraphicsFormat format, IntPtr texturePtr);
-        [DllImport(WebRTC.Lib)]
         public static extern void ContextAddRefPtr(IntPtr context, IntPtr ptr);
         [DllImport(WebRTC.Lib)]
         public static extern void ContextDeleteRefPtr(IntPtr context, IntPtr ptr);
-        [DllImport(WebRTC.Lib)]
-        public static extern CodecInitializationResult GetInitializationResult(IntPtr context, IntPtr track);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr PeerConnectionGetConfiguration(IntPtr ptr);
         [DllImport(WebRTC.Lib)]
@@ -924,9 +917,13 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType PeerConnectionAddTrack(IntPtr pc, IntPtr track, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string streamId, out IntPtr sender);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr PeerConnectionAddTransceiver(IntPtr context, IntPtr pc, IntPtr track);
+        public static extern IntPtr PeerConnectionAddTransceiver(IntPtr pc, IntPtr track);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr PeerConnectionAddTransceiverWithType(IntPtr context, IntPtr pc, TrackKind kind);
+        public static extern IntPtr PeerConnectionAddTransceiverWithType(IntPtr pc, TrackKind kind);
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionAddTransceiverWithInit(IntPtr pc, IntPtr track, ref RTCRtpTransceiverInitInternal init);
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionAddTransceiverWithTypeAndInit(IntPtr pc, TrackKind kind, ref RTCRtpTransceiverInitInternal init);
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType PeerConnectionRemoveTrack(IntPtr pc, IntPtr sender);
         [DllImport(WebRTC.Lib)]
@@ -970,16 +967,15 @@ namespace Unity.WebRTC
         public static extern void PeerConnectionRegisterOnRemoveTrack(IntPtr ptr, DelegateNativeOnRemoveTrack callback);
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
-        public static extern bool TransceiverGetCurrentDirection(IntPtr transceiver, ref RTCRtpTransceiverDirection direction);
+        public static extern bool TransceiverGetCurrentDirection(IntPtr transceiver, out RTCRtpTransceiverDirection direction);
         [DllImport(WebRTC.Lib)]
-        [return: MarshalAs(UnmanagedType.U1)]
         public static extern RTCErrorType TransceiverStop(IntPtr transceiver);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr TransceiverGetMid(IntPtr transceiver);
         [DllImport(WebRTC.Lib)]
         public static extern RTCRtpTransceiverDirection TransceiverGetDirection(IntPtr transceiver);
         [DllImport(WebRTC.Lib)]
-        public static extern void TransceiverSetDirection(IntPtr transceiver, RTCRtpTransceiverDirection direction);
+        public static extern RTCErrorType TransceiverSetDirection(IntPtr transceiver, RTCRtpTransceiverDirection direction);
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType TransceiverSetCodecPreferences(IntPtr transceiver, IntPtr capabilities, long length);
         [DllImport(WebRTC.Lib)]
@@ -1040,11 +1036,16 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern void ContextUnRegisterMediaStreamObserver(IntPtr ctx, IntPtr stream);
         [DllImport(WebRTC.Lib)]
-        public static extern void ContextRegisterAudioReceiveCallback(IntPtr context, IntPtr track, DelegateAudioReceive callback);
+        public static extern IntPtr ContextCreateAudioTrackSink(IntPtr context);
         [DllImport(WebRTC.Lib)]
-        public static extern void ContextUnregisterAudioReceiveCallback(IntPtr context, IntPtr track);
+        public static extern void ContextDeleteAudioTrackSink(IntPtr context, IntPtr sink);
         [DllImport(WebRTC.Lib)]
-        public static extern EncoderType ContextGetEncoderType(IntPtr context);
+        public static extern void AudioTrackAddSink(IntPtr track, IntPtr sink);
+        [DllImport(WebRTC.Lib)]
+        public static extern void AudioTrackRemoveSink(IntPtr track, IntPtr sink);
+        [DllImport(WebRTC.Lib)]
+        public static extern void AudioTrackSinkProcessAudio(
+            IntPtr sink, float[] data, int length, int channels, int sampleRate);
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool MediaStreamAddTrack(IntPtr stream, IntPtr track);
@@ -1088,11 +1089,9 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr GetRenderEventFunc(IntPtr context);
         [DllImport(WebRTC.Lib)]
+        public static extern IntPtr GetReleaseBuffersFunc(IntPtr context);
+        [DllImport(WebRTC.Lib)]
         public static extern IntPtr GetUpdateTextureFunc(IntPtr context);
-        [DllImport(WebRTC.Lib)]
-        public static extern void ContextInitLocalAudio(IntPtr context, IntPtr source, int sampleRate, int channels);
-        [DllImport(WebRTC.Lib)]
-        public static extern void ContextUninitLocalAudio(IntPtr context, IntPtr source);
         [DllImport(WebRTC.Lib)]
         public static extern void AudioSourceProcessLocalAudio(IntPtr source, IntPtr array, int sampleRate, int channels, int frames);
         [DllImport(WebRTC.Lib)]
@@ -1147,30 +1146,18 @@ namespace Unity.WebRTC
 
     internal static class VideoEncoderMethods
     {
-        static UnityEngine.Rendering.CommandBuffer _command = new UnityEngine.Rendering.CommandBuffer();
-        enum VideoStreamRenderEventId
-        {
-            Initialize = 0,
-            Encode = 1,
-            Finalize = 2,
-        }
+        static CommandBuffer _command = new CommandBuffer();
 
-        public static void InitializeEncoder(IntPtr callback, IntPtr track)
+        public static void Encode(IntPtr callback, IntPtr data)
         {
-            _command.IssuePluginEventAndData(callback, (int)VideoStreamRenderEventId.Initialize, track);
+            _command.IssuePluginEventAndData(callback, 0, data);
             Graphics.ExecuteCommandBuffer(_command);
             _command.Clear();
         }
 
-        public static void Encode(IntPtr callback, IntPtr track)
+        public static void ReleaseBuffers(IntPtr callback)
         {
-            _command.IssuePluginEventAndData(callback, (int)VideoStreamRenderEventId.Encode, track);
-            Graphics.ExecuteCommandBuffer(_command);
-            _command.Clear();
-        }
-        public static void FinalizeEncoder(IntPtr callback, IntPtr track)
-        {
-            _command.IssuePluginEventAndData(callback, (int)VideoStreamRenderEventId.Finalize, track);
+            _command.IssuePluginEventAndData(callback, 0, IntPtr.Zero);
             Graphics.ExecuteCommandBuffer(_command);
             _command.Clear();
         }

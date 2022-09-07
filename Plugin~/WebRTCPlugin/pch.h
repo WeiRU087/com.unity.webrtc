@@ -1,93 +1,61 @@
 #pragma once
-#pragma region webRTC related
-#include "api/media_stream_interface.h"
-#include "api/peer_connection_interface.h"
-#include "api/create_peerconnection_factory.h"
-#include "api/audio_codecs/audio_decoder_factory_template.h"
-#include "api/audio_codecs/audio_encoder_factory_template.h"
-#include "api/audio_codecs/opus/audio_decoder_opus.h"
-#include "api/audio_codecs/opus/audio_encoder_opus.h"
-#include "api/video_codecs/video_decoder_factory.h"
-#include "api/video_codecs/builtin_video_decoder_factory.h"
-#include "api/video_codecs/video_encoder_factory.h"
-#include "api/video_codecs/builtin_video_encoder_factory.h"
-#include "api/video_codecs/video_encoder.h"
-#include "api/video_codecs/sdp_video_format.h"
-#include "api/video/video_frame.h"
-#include "api/video/video_frame_buffer.h"
-#include "api/video/video_sink_interface.h"
-#include "api/video/i420_buffer.h"
-#include "api/video_track_source_proxy.h"
 
-#include "rtc_base/thread.h"
-#include "rtc_base/ref_counted_object.h"
-#include "rtc_base/strings/json.h"
+#pragma region std headers
+#include <array>
+#include <memory>
+#include <mutex>
+#pragma endregion
+
+#pragma region webrtc headers
 #include "rtc_base/logging.h"
-#include "rtc_base/checks.h"
-#include "rtc_base/ssl_adapter.h"
-#include "rtc_base/arraysize.h"
-#include "rtc_base/net_helpers.h"
-#include "rtc_base/string_utils.h"
-#include "rtc_base/physical_socket_server.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
-#include "rtc_base/atomic_ops.h"
-#include "rtc_base/async_tcp_socket.h"
 
 #ifdef _WIN32
 #include "rtc_base/win32.h"
-#include "rtc_base/win32_socket_server.h"
 #include "rtc_base/win32_socket_init.h"
 #include "rtc_base/win32_socket_server.h"
 #endif
+#pragma endregion
 
-#include "media/engine/internal_encoder_factory.h"
-#include "media/engine/internal_decoder_factory.h"
-#include "media/base/h264_profile_level_id.h"
-#include "media/base/adapted_video_track_source.h"
-#include "media/base/media_channel.h"
-#include "media/base/video_common.h"
-#include "media/base/video_broadcaster.h"
-
-#include "modules/video_capture/video_capture_impl.h"
-#include "modules/video_capture/video_capture_factory.h"
-#include "modules/audio_device/include/audio_device.h"
-#include "modules/audio_device/audio_device_buffer.h"
-#include "modules/audio_device/audio_device_generic.h"
-#include "modules/audio_processing/include/audio_processing.h"
-#include "modules/video_coding/codecs/h264/include/h264.h"
-#include "modules/video_coding/codecs/vp8/include/vp8.h"
-#include "modules/video_coding/codecs/vp9/include/vp9.h"
-
-#include "common_video/h264/h264_bitstream_parser.h"
-#include "common_video/h264/h264_common.h"
-#include "common_video/include/bitrate_adjuster.h"
-
-#include "pc/media_stream_observer.h"
-#include "pc/local_audio_source.h"
-
+#pragma region Unity headers
+#include <IUnityGraphics.h>
+#include <IUnityProfiler.h>
+#include <IUnityRenderingExtensions.h>
 #pragma endregion
 
 #include "PlatformBase.h"
-#include "IUnityGraphics.h"
-#include "IUnityRenderingExtensions.h"
 
-#if SUPPORT_D3D11
-#include <comdef.h>
-
-#include "d3d11.h"
-#include "IUnityGraphicsD3D11.h"
+#pragma region Platform headers
+#if UNITY_LINUX || UNITY_ANDROID
+#include <dlfcn.h>
 #endif
 
-#if SUPPORT_D3D12
-#include "d3d12.h"
-#include "d3d11_4.h"
-#include "IUnityGraphicsD3D12.h"
+#if UNITY_WIN
+#include <Windows.h>
+#endif
+
+#if CUDA_PLATFORM
+#include <cuda.h>
+#endif
+
+#if SUPPORT_D3D11 && SUPPORT_D3D12
+#include <comdef.h>
+#include <d3d11.h>
+#include <d3d11_4.h>
+#include <d3d12.h>
+#include <wrl/client.h>
+#include <cudaD3D11.h>
+
+#include <IUnityGraphicsD3D11.h>
+#include <IUnityGraphicsD3D12.h>
 #endif
 
 #if SUPPORT_OPENGL_CORE
-#define GL_GLEXT_PROTOTYPES
-#include <GL/gl.h>
-#include <GL/glu.h>
+#include <X11/Xlib.h>
+
+#include <glad/gl.h>
+#include <glad/glx.h>
+#undef CurrentTime // Defined by X11/X.h
+#undef Status // Defined by X11/Xutil.h
 #endif
 
 // Android platform
@@ -99,20 +67,32 @@
 #endif
 
 #if SUPPORT_METAL
-#include "IUnityGraphicsMetal.h"
+#import <Metal/Metal.h>
+
+#include <IUnityGraphicsMetal.h>
 #endif
 
 #if SUPPORT_VULKAN
-#include "IUnityGraphicsVulkan.h"
+#include <vulkan/vulkan.h>
+
+#include <IUnityGraphicsVulkan.h>
+
 #include "GraphicsDevice/Vulkan/LoadVulkanFunctions.h"
 
+#if _WIN32
+#include <vulkan/vulkan_win32.h>
 #endif
+#endif
+#pragma endregion
 
-#if _WIN32 && _DEBUG
-#define _CRTDBG_MAP_ALLOC
-#include <crtdbg.h>
-#define new new(_NORMAL_BLOCK, __FILE__, __LINE__)
-#endif
+// #pragma clang diagnostic push
+// #pragma clang diagnostic ignored "-Wkeyword-macro"
+// #if _WIN32 && _DEBUG
+// #define _CRTDBG_MAP_ALLOC
+// #include <crtdbg.h>
+// #define new new (_NORMAL_BLOCK, __FILE__, __LINE__)
+// #endif
+// #pragma clang diagnostic pop
 
 // audio codec isac
 #define WEBRTC_USE_BUILTIN_ISAC_FLOAT 1
@@ -125,30 +105,18 @@ namespace webrtc
     void LogPrint(const char* fmt, ...);
     void LogPrint(const wchar_t* fmt, ...);
     void checkf(bool result, const char* msg);
-#define DebugLog(...)       LogPrint("webrtc Log: " __VA_ARGS__)
-#define DebugWarning(...)   LogPrint("webrtc Warning: " __VA_ARGS__)
-#define DebugError(...)     LogPrint("webrtc Error: "  __VA_ARGS__)
-#define DebugLogW(...)      LogPrint(L"webrtc Log: " __VA_ARGS__)
-#define DebugWarningW(...)  LogPrint(L"webrtc Warning: " __VA_ARGS__)
-#define DebugErrorW(...)    LogPrint(L"webrtc Error: "  __VA_ARGS__)
+#define DebugLog(...) LogPrint("webrtc Log: " __VA_ARGS__)
+#define DebugWarning(...) LogPrint("webrtc Warning: " __VA_ARGS__)
+#define DebugError(...) LogPrint("webrtc Error: " __VA_ARGS__)
+#define DebugLogW(...) LogPrint(L"webrtc Log: " __VA_ARGS__)
+#define DebugWarningW(...) LogPrint(L"webrtc Warning: " __VA_ARGS__)
+#define DebugErrorW(...) LogPrint(L"webrtc Error: " __VA_ARGS__)
 #define NV_RESULT(NvFunction) NvFunction == NV_ENC_SUCCESS
 
 #if !UNITY_WIN
 #define CoTaskMemAlloc(p) malloc(p)
 #define CoTaskMemFree(p) free(p)
 #endif
-
-#if SUPPORT_OPENGL_CORE || SUPPORT_OPENGL_ES
-    void OnOpenGLDebugMessage( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* userParam);
-#endif
-    template<class ... Args>
-    std::string StringFormat(const std::string& format, Args ... args)
-    {
-        size_t size = snprintf(nullptr, 0, format.c_str(), args ...) + 1;
-        std::unique_ptr<char[]> buf(new char[size]);
-        snprintf(buf.get(), size, format.c_str(), args ...);
-        return std::string(buf.get(), buf.get() + size - 1);
-    }
 
     using byte = unsigned char;
     using uint8 = unsigned char;
@@ -161,13 +129,5 @@ namespace webrtc
     using int64 = signed long long;
 
     const uint32 bufferedFrameNum = 3;
-
-    /// todo(kazuki):: rename the type since it is also used to determine the decoder type.
-    enum UnityEncoderType
-    {
-        UnityEncoderSoftware = 0,
-        UnityEncoderHardware = 1,
-    };
-
 } // end namespace webrtc
 } // end namespace unity

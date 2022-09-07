@@ -5,22 +5,38 @@ target_sources(WebRTCLibTest
     pch.cpp
     pch.h
     ContextTest.cpp
+    CreateVideoCodecFactoryTest.cpp
+    FrameGenerator.cpp
+    FrameGenerator.h
+    GpuMemoryBufferTest.cpp
+    GpuMemoryBufferPoolTest.cpp
+    GraphicsDeviceContainer.cpp
+    GraphicsDeviceContainer.h
+    GraphicsDeviceContainerTest.cpp
     GraphicsDeviceTest.cpp
     GraphicsDeviceTestBase.cpp
     GraphicsDeviceTestBase.h
-)
-
-# todo(kazuki):: fix linker error on macOS and iOS
-if(NOT (macOS OR iOS))
-target_sources(WebRTCLibTest
-  PRIVATE
+    H264ProfileLevelIdTest.cpp
+    InternalCodecsTest.cpp
+    UnityVideoEncoderFactoryTest.cpp
+    UnityVideoDecoderFactoryTest.cpp
+    VideoCodecTest.cpp
+    VideoCodecTest.h
+    VideoFrameSchedulerTest.cpp
+    VideoFrameTest.cpp
     VideoRendererTest.cpp
     VideoTrackSourceTest.cpp
-)    
-endif()
+)
 
 if(Windows OR Linux)
   add_subdirectory(NvCodec)
+endif()
+
+if(Linux OR Android)
+  target_sources(WebRTCLibTest
+    PRIVATE
+      OpenGLContextTest.cpp
+  )
 endif()
 
 include(FetchContent)
@@ -28,7 +44,7 @@ include(FetchContent)
 FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        release-1.10.0
+  GIT_TAG        release-1.11.0
 )
 
 FetchContent_GetProperties(googletest)
@@ -42,6 +58,11 @@ if(NOT googletest_POPULATED)
 endif()
 
 include(GoogleTest)
+
+target_compile_definitions(WebRTCLibTest
+  PRIVATE 
+    "$<$<CONFIG:Debug>:DEBUG>"
+)
 
 if(NOT iOS)
   target_include_directories(WebRTCLibTest
@@ -110,6 +131,7 @@ if(Windows)
       wmcodecdspuuid
       WebRTCLib
       Strmiids
+      delayimp.lib
   )
   target_include_directories(WebRTCLibTest
     PRIVATE
@@ -123,8 +145,8 @@ if(Windows)
       COMPILE_FLAGS "/Yc /Ycpch.h"
   )
   set_target_properties(WebRTCLibTest
-    PROPERTIES
-      LINK_FLAGS "/DELAYLOAD:nvcuda.dll /DELAYLOAD:vulkan-1.dll"
+    PROPERTIES    
+      LINK_FLAGS "-delayload:nvcuda.dll -delayload:nvEncodeAPI64.dll -delayload:nvcuvid.dll -delayload:vulkan-1.dll"
       MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
   )
 elseif(macOS)
@@ -134,6 +156,8 @@ elseif(macOS)
   set_target_properties(WebRTCLibTest 
     PROPERTIES 
       LINK_FLAGS "-ObjC"
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON
   )
   target_link_libraries(WebRTCLibTest
     PRIVATE
@@ -151,11 +175,7 @@ elseif(macOS)
       ${WEBRTC_OBJC_INCLUDE_DIR}
   )
 elseif(Linux)
-  find_package(OpenGL REQUIRED)
-  find_package(GLUT REQUIRED)
-  find_package(PkgConfig REQUIRED)
-
-  pkg_check_modules(GLIB REQUIRED glib-2.0)
+  find_package(glfw3 REQUIRED)
 
   target_compile_options(WebRTCLibTest
     PUBLIC
@@ -176,13 +196,9 @@ elseif(Linux)
 
   target_link_libraries(WebRTCLibTest
     PRIVATE
-      ${WEBRTC_LIBRARY}
-      ${OPENGL_opengl_LIBRARY}
-      ${GLUT_LIBRARY}
       ${CMAKE_DL_LIBS}
       ${CMAKE_THREAD_LIBS_INIT}
-      ${Vulkan_LIBRARY}
-      ${GLIB_LIBRARIES}
+      glfw
       gtest
       gmock
       gtest_main
@@ -193,7 +209,6 @@ elseif(Linux)
       ..
       ${CUDA_INCLUDE_DIRS}
       ${NVCODEC_INCLUDE_DIR}
-      ${GLIB_INCLUDE_DIRS}
   )
 elseif(iOS)
   set(CMAKE_C_FLAGS "-x objective-c")

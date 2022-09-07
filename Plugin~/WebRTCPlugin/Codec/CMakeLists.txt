@@ -1,16 +1,11 @@
 target_sources(WebRTCLib
   PRIVATE
-    EncoderFactory.cpp
-    EncoderFactory.h
-    IEncoder.h
+    CreateVideoCodecFactory.cpp
+    CreateVideoCodecFactory.h
+    H264ProfileLevelId.cpp
+    H264ProfileLevelId.h
 )
-
-add_subdirectory(SoftwareCodec)
 
 if(Windows OR Linux)
   add_subdirectory(NvCodec)
-endif()
-
-if(Android)
-  add_subdirectory(AndroidCodec)
 endif()

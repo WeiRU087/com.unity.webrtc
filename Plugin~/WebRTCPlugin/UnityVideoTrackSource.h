@@ -1,22 +1,29 @@
 #pragma once
 
 #include <mutex>
-#include "Codec/IEncoder.h"
-#include "rtc_base/timestamp_aligner.h"
 
-namespace unity {
-namespace webrtc {
+#include <api/task_queue/task_queue_factory.h>
+#include <media/base/adapted_video_track_source.h>
+#include <rtc_base/task_queue.h>
+#include <absl/types/optional.h>
+#include <api/media_stream_interface.h>
 
-class IEncoder;
+#include "VideoFrame.h"
 
-// This class implements webrtc's VideoTrackSourceInterface. To pass frames down
-// the webrtc video pipeline, each received a media::VideoFrame is converted to
-// a webrtc::VideoFrame, taking any adaptation requested by downstream classes
-// into account.
-class UnityVideoTrackSource :
-    public rtc::AdaptedVideoTrackSource,
-    public sigslot::has_slots<>
+namespace unity
 {
+namespace webrtc
+{
+
+    using namespace ::webrtc;
+
+    // This class implements webrtc's VideoTrackSourceInterface. To pass frames down
+    // the webrtc video pipeline, each received a media::VideoFrame is converted to
+    // a webrtc::VideoFrame, taking any adaptation requested by downstream classes
+    // into account.
+    class VideoFrameScheduler;
+    class UnityVideoTrackSource : public rtc::AdaptedVideoTrackSource
+    {
     public:
         struct FrameAdaptationParams
         {
@@ -29,59 +36,53 @@ class UnityVideoTrackSource :
             int scale_to_height;
         };
 
-    UnityVideoTrackSource(
-        bool is_screencast, absl::optional<bool> needs_denoising);
-    ~UnityVideoTrackSource() override;
+        UnityVideoTrackSource(
+            bool is_screencast, absl::optional<bool> needs_denoising, TaskQueueFactory* taskQueueFactory);
+        ~UnityVideoTrackSource() override;
+        // void SetState(SourceState state);
+        SourceState state() const override;
 
-    SourceState state() const override;
+        bool remote() const override;
+        bool is_screencast() const override;
+        absl::optional<bool> needs_denoising() const override;
+        void OnFrameCaptured(rtc::scoped_refptr<VideoFrame> frame);
 
-    bool remote() const override;
-    bool is_screencast() const override;
-    absl::optional<bool> needs_denoising() const override;
+        using VideoTrackSourceInterface::AddOrUpdateSink;
+        using VideoTrackSourceInterface::RemoveSink;
 
-    // note:: call from render thread
-    void Init(void* frame);
+        static rtc::scoped_refptr<UnityVideoTrackSource>
+        Create(bool is_screencast, absl::optional<bool> needs_denoising, TaskQueueFactory* taskQueueFactory);
 
-    // note:: call from render thread
-    void OnFrameCaptured(int64_t timestampe_us);
+    private:
+        void CaptureNextFrame();
+        void SendFeedback();
+         FrameAdaptationParams ComputeAdaptationParams(int width,
+                                                    int height,
+                                                    int64_t time_us);
 
-    // todo(kazuki)::
-    void DelegateOnFrame(const ::webrtc::VideoFrame& frame) { OnFrame(frame); }
+        // Delivers |frame| to base class method
+        // rtc::AdaptedVideoTrackSource::OnFrame(). If the cropping (given via
+        // |frame->visible_rect()|) has changed since the last delivered frame, the
+        // whole frame is marked as updated.
+        // void DeliverFrame(rtc::scoped_refptr<::webrtc::VideoFrame> frame,
+        //                  gfx::Rect* update_rect,
+        //                  int64_t timestamp_us);
 
-    // todo(kazuki)::
-    void SetEncoder(IEncoder* encoder);
+        // |thread_checker_| is bound to the libjingle worker thread.
+        // todo::(kazuki) change compiler vc to clang
+        // media::VideoFramePool scaled_frame_pool_;
 
-    // todo(kazuki)::
-    CodecInitializationResult GetCodecInitializationResult() const;
-    using ::webrtc::VideoTrackSourceInterface::AddOrUpdateSink;
-    using ::webrtc::VideoTrackSourceInterface::RemoveSink;
+        // State for the timestamp translation.
+        rtc::TimestampAligner timestamp_aligner_;
 
- private:
-    FrameAdaptationParams ComputeAdaptationParams(
-        int width, int height, int64_t time_us);
+        const bool is_screencast_;
+        const absl::optional<bool> needs_denoising_;
+        std::mutex mutex_;
 
-    // Delivers |frame| to base class method
-    // rtc::AdaptedVideoTrackSource::OnFrame(). If the cropping (given via
-    // |frame->visible_rect()|) has changed since the last delivered frame, the
-    // whole frame is marked as updated.
-    // void DeliverFrame(rtc::scoped_refptr<::webrtc::VideoFrame> frame,
-    //                  gfx::Rect* update_rect,
-    //                  int64_t timestamp_us);
-
-    // |thread_checker_| is bound to the libjingle worker thread.
-    // THREAD_CHECKER(thread_checker_);
-    // media::VideoFramePool scaled_frame_pool_;
-    // State for the timestamp translation.
-    rtc::TimestampAligner timestamp_aligner_;
-
-    const bool is_screencast_;
-    const absl::optional<bool> needs_denoising_;
-
-    std::mutex m_mutex;
-    IEncoder* encoder_;
-    void* frame_;
-    webrtc::Clock* clock_;
-};
+        std::unique_ptr<rtc::TaskQueue> taskQueue_;
+        std::unique_ptr<VideoFrameScheduler> scheduler_;
+        rtc::scoped_refptr<unity::webrtc::VideoFrame> frame_;
+    };
 
 } // end namespace webrtc
 } // end namespace unity

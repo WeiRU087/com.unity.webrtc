@@ -1,9 +1,20 @@
 #include "pch.h"
+
 #include "third_party/libyuv/include/libyuv.h"
 
 #include "OpenGLGraphicsDevice.h"
 #include "OpenGLTexture2D.h"
 #include "GraphicsDevice/GraphicsUtility.h"
+
+#include "OpenGLContext.h"
+
+#if CUDA_PLATFORM
+#include <cuda.h>
+#include <cudaGL.h>
+#include "GraphicsDevice/Cuda/GpuMemoryBufferCudaHandle.h"
+#else
+#include "GpuMemoryBuffer.h"
+#endif
 
 namespace unity
 {
@@ -14,13 +25,31 @@ namespace webrtc
 GLuint fbo[2];
 #endif
 
-OpenGLGraphicsDevice::OpenGLGraphicsDevice()
+Size glTexSize(GLenum target, GLuint texture, GLint mipLevel)
 {
+    int width = 0, height = 0;
+    glBindTexture(target, texture);
+    glGetTexLevelParameteriv(target, mipLevel, GL_TEXTURE_WIDTH, &width);
+    glGetTexLevelParameteriv(target, mipLevel, GL_TEXTURE_HEIGHT, &height);
+    glBindTexture(target, 0);
+    return Size(width, height);
+}
+
+
+OpenGLGraphicsDevice::OpenGLGraphicsDevice(
+    UnityGfxRenderer renderer, ProfilerMarkerFactory* profiler)
+    : IGraphicsDevice(renderer, profiler)
+    , mainContext_(nullptr)
+{
+    OpenGLContext::Init();
+
+    mainContext_ = OpenGLContext::CurrentContext();
+    RTC_DCHECK(mainContext_);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-OpenGLGraphicsDevice::~OpenGLGraphicsDevice() {
-
+OpenGLGraphicsDevice::~OpenGLGraphicsDevice()
+{
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -68,7 +97,10 @@ ITexture2D* OpenGLGraphicsDevice::CreateDefaultTextureV(
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, w, h);
     glBindTexture(GL_TEXTURE_2D, 0);
-    return new OpenGLTexture2D(w, h, tex);
+
+    OpenGLTexture2D::ReleaseOpenGLTextureCallback callback =
+        std::bind(&OpenGLGraphicsDevice::ReleaseTexture, this, std::placeholders::_1);
+    return new OpenGLTexture2D(w, h, tex, callback);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -81,24 +113,26 @@ ITexture2D* OpenGLGraphicsDevice::CreateCPUReadTextureV(
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool OpenGLGraphicsDevice::CopyResourceV(ITexture2D* dest, ITexture2D* src) {
-    const uint32_t width = dest->GetWidth();
-    const uint32_t height  = dest->GetHeight();
-    const GLuint dstName = reinterpret_cast<uintptr_t>(dest->GetNativeTexturePtrV());
-    const GLuint srcName = reinterpret_cast<uintptr_t>(src->GetNativeTexturePtrV());
-    return CopyResource(dstName, srcName, width, height);
+bool OpenGLGraphicsDevice::CopyResourceV(ITexture2D* dst, ITexture2D* src)
+{
+    OpenGLTexture2D* srcTexture = static_cast<OpenGLTexture2D*>(src);
+    OpenGLTexture2D* dstTexture = static_cast<OpenGLTexture2D*>(dst);
+    const GLuint srcName = srcTexture->GetTexture();
+    const GLuint dstName = dstTexture->GetTexture();
+    return CopyResource(dstName, srcName);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool OpenGLGraphicsDevice::CopyResourceFromNativeV(ITexture2D* dest, void* nativeTexturePtr) {
-    const uint32_t width = dest->GetWidth();
-    const uint32_t height  = dest->GetHeight();
-    const GLuint dstName = reinterpret_cast<uintptr_t>(dest->GetNativeTexturePtrV());
+bool OpenGLGraphicsDevice::CopyResourceFromNativeV(ITexture2D* dst, void* nativeTexturePtr)
+{
+    OpenGLTexture2D* dstTexture = static_cast<OpenGLTexture2D*>(dst);
     const GLuint srcName = reinterpret_cast<uintptr_t>(nativeTexturePtr);
-    return CopyResource(dstName, srcName, width, height);
+    const GLuint dstName = dstTexture->GetTexture();
+    return CopyResource(dstName, srcName);
 }
 
-bool OpenGLGraphicsDevice::CopyResource(GLuint dstName, GLuint srcName, uint32 width, uint32 height) {
+bool OpenGLGraphicsDevice::CopyResource(GLuint dstName, GLuint srcName)
+{
     if(srcName == dstName)
     {
         RTC_LOG(LS_INFO) << "Same texture";
@@ -115,25 +149,39 @@ bool OpenGLGraphicsDevice::CopyResource(GLuint dstName, GLuint srcName, uint32 w
         return false;
     }
 
+    Size srcSize = glTexSize(GL_TEXTURE_2D, srcName, 0);
+    Size dstSize = glTexSize(GL_TEXTURE_2D, dstName, 0);
+
+    if(srcSize.width() == 0 || srcSize.height() == 0)
+    {
+        RTC_LOG(LS_INFO) << "texture size is not valid";
+        return false;
+    }
+    if(srcSize != dstSize)
+    {
+        RTC_LOG(LS_INFO) << "texture size is not same";
+        return false;
+    }
+
     // todo(kazuki): "glCopyImageSubData" is available since OpenGL ES 3.2 on Android platform.
     // OpenGL ES 3.2 is needed to use API level 24.
-//#if SUPPORT_OPENGL_CORE
     glCopyImageSubData(
         srcName, GL_TEXTURE_2D, 0, 0, 0, 0,
         dstName, GL_TEXTURE_2D, 0, 0, 0, 0,
-        width, height, 1);
-// #elif SUPPORT_OPENGL_ES
-//     glBindTexture(GL_TEXTURE_2D, srcName);
-//     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo[1]);
-//     glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,
-//         GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, srcName, 0);
+        dstSize.width(), dstSize.height(), 1);
 
-//     glBindTexture(GL_TEXTURE_2D, dstName);
-//     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
-//     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-//     glBindTexture(GL_TEXTURE_2D, 0);
-// #endif
+    // todo(kazuki): "glFinish" is used to sync GPU for waiting to copy the texture buffer.
+    // But this command affects graphics performance.
+    glFinish();
+
     return true;
+}
+
+void OpenGLGraphicsDevice::ReleaseTexture(OpenGLTexture2D* texture)
+{
+    if(!OpenGLContext::CurrentContext())
+        contexts_.push_back(OpenGLContext::CreateGLContext(mainContext_.get()));
+    texture->Release();
 }
 
 void GetTexImage(GLenum target, GLint level, GLenum format, GLenum type, void *pixels)
@@ -163,6 +211,9 @@ void GetTexImage(GLenum target, GLint level, GLenum format, GLenum type, void *p
 
 rtc::scoped_refptr<webrtc::I420Buffer> OpenGLGraphicsDevice::ConvertRGBToI420(ITexture2D* tex)
 {
+    if(!OpenGLContext::CurrentContext())
+        contexts_.push_back(OpenGLContext::CreateGLContext(mainContext_.get()));
+
     OpenGLTexture2D* sourceTex = static_cast<OpenGLTexture2D*>(tex);
     const GLuint sourceId = reinterpret_cast<uintptr_t>(sourceTex->GetNativeTexturePtrV());
     const GLuint pbo = sourceTex->GetPBO();
@@ -180,9 +231,9 @@ rtc::scoped_refptr<webrtc::I420Buffer> OpenGLGraphicsDevice::ConvertRGBToI420(IT
     // Send PBO to main memory
     GLubyte* pboPtr = static_cast<GLubyte*>(glMapBufferRange(
         GL_PIXEL_PACK_BUFFER, 0, bufferSize, GL_MAP_READ_BIT));
-    if (pboPtr != nullptr)
+    if (pboPtr)
     {
-        memcpy(data, pboPtr, bufferSize);
+        std::memcpy(data, pboPtr, bufferSize);
         glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
     }
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -204,6 +255,57 @@ rtc::scoped_refptr<webrtc::I420Buffer> OpenGLGraphicsDevice::ConvertRGBToI420(IT
     );
     return i420_buffer;
 }
+
+    std::unique_ptr<GpuMemoryBufferHandle> OpenGLGraphicsDevice::Map(ITexture2D* texture)
+    {
+#if CUDA_PLATFORM
+        if(!IsCudaSupport())
+            return nullptr;
+
+        if(!OpenGLContext::CurrentContext())
+            contexts_.push_back(OpenGLContext::CreateGLContext(mainContext_.get()));
+
+        OpenGLTexture2D* glTexture2D = static_cast<OpenGLTexture2D*>(texture);
+
+        CUarray mappedArray;
+        CUgraphicsResource resource;
+        GLuint image = glTexture2D->GetTexture();
+        GLenum target = GL_TEXTURE_2D;
+
+        // set context on the thread.
+        cuCtxPushCurrent(GetCUcontext());
+
+        CUresult result = cuGraphicsGLRegisterImage(&resource, image, target, CU_GRAPHICS_REGISTER_FLAGS_SURFACE_LDST);
+        if (result != CUDA_SUCCESS)
+        {
+            RTC_LOG(LS_ERROR) << "cuGraphicsD3D11RegisterResource error" << result;
+            throw;
+        }
+
+        result = cuGraphicsMapResources(1, &resource, 0);
+        if (result != CUDA_SUCCESS)
+        {
+            RTC_LOG(LS_ERROR) << "cuGraphicsMapResources";
+            throw;
+        }
+
+        result = cuGraphicsSubResourceGetMappedArray(&mappedArray, resource, 0, 0);
+        if (result != CUDA_SUCCESS)
+        {
+            RTC_LOG(LS_ERROR) << "cuGraphicsSubResourceGetMappedArray";
+            throw;
+        }
+        cuCtxPopCurrent(NULL);
+
+        std::unique_ptr<GpuMemoryBufferCudaHandle> handle = std::make_unique<GpuMemoryBufferCudaHandle>();
+        handle->context = GetCUcontext();
+        handle->mappedArray = mappedArray;
+        handle->resource = resource;
+        return handle;
+#else
+        return nullptr;
+#endif
+    }
 
 } // end namespace webrtc
 } // end namespace unity

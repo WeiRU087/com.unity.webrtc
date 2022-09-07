@@ -1,11 +1,14 @@
+// todo(kazuki):: fix workaround
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-variable"
+
 #ifndef EXPORTED_VULKAN_FUNCTION
-#define EXPORTED_VULKAN_FUNCTION( function )
+#define EXPORTED_VULKAN_FUNCTION(function)
 #endif
 
 EXPORTED_VULKAN_FUNCTION(vkGetInstanceProcAddr)
 
 #undef EXPORTED_VULKAN_FUNCTION
-
 
 #ifndef GLOBAL_VULKAN_FUNCTION
 #define GLOBAL_VULKAN_FUNCTION(func)
@@ -31,7 +34,7 @@ INSTANCE_VULKAN_FUNCTION(vkDestroyInstance)
 #undef INSTANCE_VULKAN_FUNCTION
 
 #ifndef DEVICE_VULKAN_FUNCTION
-#define DEVICE_VULKAN_FUNCTION( function )
+#define DEVICE_VULKAN_FUNCTION(function)
 #endif
 
 DEVICE_VULKAN_FUNCTION(vkDestroyDevice)
@@ -70,9 +73,17 @@ DEVICE_VULKAN_FUNCTION(vkCmdCopyImage)
 DEVICE_VULKAN_FUNCTION(vkCmdPipelineBarrier)
 DEVICE_VULKAN_FUNCTION(vkCreateImageView)
 DEVICE_VULKAN_FUNCTION(vkEndCommandBuffer)
+DEVICE_VULKAN_FUNCTION(vkResetCommandBuffer)
 DEVICE_VULKAN_FUNCTION(vkFreeCommandBuffers)
 DEVICE_VULKAN_FUNCTION(vkGetImageMemoryRequirements)
 DEVICE_VULKAN_FUNCTION(vkQueueSubmit)
 DEVICE_VULKAN_FUNCTION(vkDestroyPipelineLayout)
+DEVICE_VULKAN_FUNCTION(vkWaitForFences)
+DEVICE_VULKAN_FUNCTION(vkCreateFence)
+DEVICE_VULKAN_FUNCTION(vkDestroyFence)
+DEVICE_VULKAN_FUNCTION(vkResetFences)
+DEVICE_VULKAN_FUNCTION(vkGetFenceStatus)
 
 #undef DEVICE_LEVEL_VULKAN_FUNCTION
+
+#pragma clang diagnostic pop

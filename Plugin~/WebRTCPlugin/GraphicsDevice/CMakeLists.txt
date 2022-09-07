@@ -2,12 +2,9 @@ target_sources(WebRTCLib
   PRIVATE
     GraphicsDevice.cpp
     GraphicsDevice.h
-    GraphicsDeviceType.h
     GraphicsUtility.cpp
     GraphicsUtility.h
-    IGraphicsDevice.cpp
     IGraphicsDevice.h
-    ITexture2D.cpp
     ITexture2D.h
 )
 

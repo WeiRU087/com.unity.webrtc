@@ -8,11 +8,12 @@ using UnityEngine.UI;
 
 namespace Unity.WebRTC
 {
-    public class AudioSample : MonoBehaviour
+    class AudioSample : MonoBehaviour
     {
         [SerializeField] private AudioSource inputAudioSource;
         [SerializeField] private AudioSource outputAudioSource;
         [SerializeField] private Toggle toggleEnableMicrophone;
+        [SerializeField] private Toggle toggleLoopback;
         [SerializeField] private Dropdown dropdownAudioClips;
         [SerializeField] private Dropdown dropdownMicrophoneDevices;
         [SerializeField] private Dropdown dropdownAudioCodecs;
@@ -43,11 +44,11 @@ namespace Unity.WebRTC
         private Dictionary<string, ulong?> bandwidthOptions = new Dictionary<string, ulong?>()
         {
             { "undefined", null },
+            { "320",  320 },
             { "160",  160 },
             { "80", 80 },
             { "40", 40 },
             { "20",  20 },
-            { "10",  10 },
         };
 
         private Dictionary<string, int> dspBufferSizeOptions = new Dictionary<string, int>()
@@ -59,12 +60,14 @@ namespace Unity.WebRTC
 
     void Start()
         {
-            WebRTC.Initialize(WebRTCSettings.EncoderType, WebRTCSettings.LimitTextureSize);
+            WebRTC.Initialize(WebRTCSettings.LimitTextureSize);
             StartCoroutine(WebRTC.Update());
             StartCoroutine(LoopStatsCoroutine());
 
             toggleEnableMicrophone.isOn = false;
             toggleEnableMicrophone.onValueChanged.AddListener(OnEnableMicrophone);
+            toggleEnableMicrophone.isOn = false;
+            toggleLoopback.onValueChanged.AddListener(OnChangeLoopback);
             dropdownAudioClips.interactable = true;
             dropdownAudioClips.options =
                 audioclipList.Select(clip => new Dropdown.OptionData(clip.name)).ToList();
@@ -96,7 +99,7 @@ namespace Unity.WebRTC
                 availableCodecs.Add(codec);
             }
             dropdownAudioCodecs.AddOptions(availableCodecs.Select(codec =>
-                new Dropdown.OptionData(string.Format($"{codec.mimeType} {codec.clockRate} {codec.sdpFmtpLine.Replace(";", " ")}"))).ToList());
+                new Dropdown.OptionData(CodecToOptionName(codec))).ToList());
 
             dropdownBandwidth.options = bandwidthOptions
                 .Select(pair => new Dropdown.OptionData { text = pair.Key })
@@ -112,6 +115,13 @@ namespace Unity.WebRTC
             buttonPause.onClick.AddListener(OnPause);
             buttonResume.onClick.AddListener(OnResume);
             buttonHangup.onClick.AddListener(OnHangUp);
+        }
+
+        static string CodecToOptionName(RTCRtpCodecCapability cap)
+        {
+            return string.Format($"{cap.mimeType} " +
+                $"{cap.clockRate} " +
+                $"channel={cap.channels}");
         }
 
         void OnDestroy()
@@ -142,12 +152,21 @@ namespace Unity.WebRTC
             buttonHangup.interactable = true;
             dropdownSpeakerMode.interactable = false;
             dropdownDSPBufferSize.interactable = false;
+            dropdownAudioCodecs.interactable = false;
         }
 
         void OnEnableMicrophone(bool enable)
         {
             dropdownMicrophoneDevices.interactable = enable;
             dropdownAudioClips.interactable = !enable;
+        }
+
+        void OnChangeLoopback(bool loopback)
+        {
+            if (m_audioTrack != null)
+            {
+                m_audioTrack.Loopback = loopback;
+            }
         }
 
         void OnCall()
@@ -177,6 +196,7 @@ namespace Unity.WebRTC
             transceiver2.Direction = RTCRtpTransceiverDirection.RecvOnly;
 
             m_audioTrack = new AudioStreamTrack(inputAudioSource);
+            m_audioTrack.Loopback = toggleLoopback.isOn;
             _pc1.AddTrack(m_audioTrack, _sendStream);
 
             var transceiver1 = _pc1.GetTransceivers().First();
@@ -220,13 +240,9 @@ namespace Unity.WebRTC
         {
             var track = e.Track as AudioStreamTrack;
             outputAudioSource.SetTrack(track);
-            track.OnAudioReceived += OnAudioReceived;
-        }
+            outputAudioSource.loop = true;
+            outputAudioSource.Play();
 
-        void OnAudioReceived(AudioSource renderer)
-        {
-            renderer.loop = true;
-            renderer.Play();
         }
 
         void OnHangUp()
@@ -255,12 +271,16 @@ namespace Unity.WebRTC
 
             dropdownSpeakerMode.interactable = true;
             dropdownDSPBufferSize.interactable = true;
+            dropdownAudioCodecs.interactable = true;
+
             dropdownBandwidth.interactable = false;
 
         }
 
         void OnDeviceChanged(int value)
         {
+            if (dropdownMicrophoneDevices.options.Count == 0)
+                return;
             m_deviceName = dropdownMicrophoneDevices.options[value].text;
             Microphone.GetDeviceCaps(m_deviceName, out int minFreq, out int maxFreq);
         }
@@ -283,10 +303,10 @@ namespace Unity.WebRTC
                 parameters.encodings[0].minBitrate = bandwidth * 1000;
             }
 
-            RTCErrorType error = sender.SetParameters(parameters);
-            if (error != RTCErrorType.None)
+            RTCError error = sender.SetParameters(parameters);
+            if (error.errorType != RTCErrorType.None)
             {
-                Debug.LogErrorFormat("RTCRtpSender.SetParameters failed {0}", error);
+                Debug.LogErrorFormat("RTCRtpSender.SetParameters failed {0}", error.errorType);
             }
 
             Debug.Log("SetParameters:" + bandwidth);

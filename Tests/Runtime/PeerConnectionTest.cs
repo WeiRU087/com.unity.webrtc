@@ -33,8 +33,7 @@ namespace Unity.WebRTC.RuntimeTest
         [SetUp]
         public void SetUp()
         {
-            var type = TestHelper.HardwareCodecSupport() ? EncoderType.Hardware : EncoderType.Software;
-            WebRTC.Initialize(type: type, limitTextureSize: true, forTest: true);
+            WebRTC.Initialize(true);
         }
 
         [TearDown]
@@ -70,7 +69,7 @@ namespace Unity.WebRTC.RuntimeTest
         {
             var peer = new RTCPeerConnection();
             peer.Dispose();
-            Assert.That(() => {  var state = peer.ConnectionState; }, Throws.TypeOf<ObjectDisposedException>());
+            Assert.That(() => { var state = peer.ConnectionState; }, Throws.TypeOf<ObjectDisposedException>());
         }
 
         [Test]
@@ -151,13 +150,20 @@ namespace Unity.WebRTC.RuntimeTest
         }
 
         [Test]
+        public void AddTrackThrowException()
+        {
+            var peer = new RTCPeerConnection();
+            Assert.Throws<ArgumentNullException>(() => peer.AddTrack(null));
+        }
+
+        [Test]
         [Category("PeerConnection")]
         public void AddTransceiver()
         {
             var peer = new RTCPeerConnection();
             var width = 256;
             var height = 256;
-            var format = WebRTC.GetSupportedRenderTextureFormat(UnityEngine.SystemInfo.graphicsDeviceType);
+            var format = WebRTC.GetSupportedRenderTextureFormat(SystemInfo.graphicsDeviceType);
             var rt = new UnityEngine.RenderTexture(width, height, 0, format);
             rt.Create();
 
@@ -192,6 +198,49 @@ namespace Unity.WebRTC.RuntimeTest
             peer.Dispose();
             Object.DestroyImmediate(rt);
         }
+
+        [Test]
+        [Category("PeerConnection")]
+        public void GetTransceiversReturnsNotEmptyAfterDisposingTransceiver()
+        {
+            // `RTCPeerConnection.AddTransceiver` method is not intuitive. Moreover, we don't have the API to remove
+            // the transceiver from RTCPeerConnection directly.
+            var peer = new RTCPeerConnection();
+            var transceiver = peer.AddTransceiver(TrackKind.Video);
+            Assert.That(peer.GetTransceivers(), Has.Count.EqualTo(1));
+            transceiver.Dispose();
+            Assert.That(peer.GetTransceivers(), Has.Count.EqualTo(1));
+            peer.Dispose();
+        }
+
+        [Test]
+        [Category("PeerConnection")]
+        public void GetTransceiversReturnsNotEmptyAfterCallingRemoveTrack()
+        {
+            // Also, `RTCPeerConnection.AddTrack` and `RTCPeerConnection.RemoveTrack` method is not intuitive.
+            var peer = new RTCPeerConnection();
+            var width = 256;
+            var height = 256;
+            var format = WebRTC.GetSupportedRenderTextureFormat(UnityEngine.SystemInfo.graphicsDeviceType);
+            var rt = new UnityEngine.RenderTexture(width, height, 0, format);
+            rt.Create();
+            var track = new VideoStreamTrack(rt);
+            var sender = peer.AddTrack(track);
+            Assert.That(peer.GetTransceivers(), Has.Count.EqualTo(1));
+            Assert.That(peer.RemoveTrack(sender), Is.EqualTo(RTCErrorType.None));
+            Assert.That(peer.GetTransceivers(), Has.Count.EqualTo(1));
+            peer.Dispose();
+        }
+
+
+        [Test]
+        [Category("PeerConnection")]
+        public void AddTransceiverThrowException()
+        {
+            var peer = new RTCPeerConnection();
+            Assert.Throws<ArgumentNullException>(() => peer.AddTransceiver(null));
+        }
+
 
         [Test]
         [Category("PeerConnection")]
@@ -236,6 +285,79 @@ namespace Unity.WebRTC.RuntimeTest
 
             peer.Dispose();
         }
+
+        [Test]
+        [Category("PeerConnection")]
+        public void AddTransceiverWithInit()
+        {
+            var peer = new RTCPeerConnection();
+            var stream = new MediaStream();
+            var direction = RTCRtpTransceiverDirection.SendOnly;
+            var width = 256;
+            var height = 256;
+            var format = WebRTC.GetSupportedRenderTextureFormat(UnityEngine.SystemInfo.graphicsDeviceType);
+            var rt = new RenderTexture(width, height, 0, format);
+            rt.Create();
+            var track = new VideoStreamTrack(rt);
+            var init = new RTCRtpTransceiverInit()
+            {
+                direction = direction,
+                sendEncodings = new RTCRtpEncodingParameters[] {
+                    new RTCRtpEncodingParameters { maxFramerate = 30 }
+                },
+                streams = new MediaStream[] { stream }
+            };
+            var transceiver = peer.AddTransceiver(track, init);
+            Assert.That(transceiver, Is.Not.Null);
+            Assert.That(transceiver.CurrentDirection, Is.Null);
+            Assert.That(transceiver.Direction, Is.EqualTo(RTCRtpTransceiverDirection.SendOnly));
+            Assert.That(transceiver.Sender, Is.Not.Null);
+
+            var parameters = transceiver.Sender.GetParameters();
+            Assert.That(parameters, Is.Not.Null);
+            Assert.That(parameters.codecs, Is.Not.Null.And.Empty);
+            peer.Dispose();
+        }
+
+        [Test]
+        [Category("PeerConnection")]
+        public void AddTransceiverWithKindAndInit()
+        {
+            var peer = new RTCPeerConnection();
+            var stream = new MediaStream();
+            var direction = RTCRtpTransceiverDirection.SendOnly;
+            var init = new RTCRtpTransceiverInit()
+            {
+                direction = direction,
+                sendEncodings = new RTCRtpEncodingParameters[] {
+                    new RTCRtpEncodingParameters { maxFramerate = 30 }
+                },
+                streams = new MediaStream[] { stream }
+            };
+            var transceiver = peer.AddTransceiver(TrackKind.Video, init);
+            Assert.That(transceiver, Is.Not.Null);
+            Assert.That(transceiver.CurrentDirection, Is.Null);
+            Assert.That(transceiver.Direction, Is.EqualTo(RTCRtpTransceiverDirection.SendOnly));
+            Assert.That(transceiver.Sender, Is.Not.Null);
+
+            var parameters = transceiver.Sender.GetParameters();
+            Assert.That(parameters, Is.Not.Null);
+            Assert.That(parameters.codecs, Is.Not.Null.And.Empty);
+
+            var init2 = new RTCRtpTransceiverInit()
+            {
+                direction = null,
+                sendEncodings = null,
+                streams = null
+            };
+            var transceiver2 = peer.AddTransceiver(TrackKind.Video, init2);
+            Assert.That(transceiver2, Is.Not.Null);
+            Assert.That(transceiver2.CurrentDirection, Is.Null);
+            Assert.That(transceiver2.Direction, Is.EqualTo(RTCRtpTransceiverDirection.SendRecv));
+            Assert.That(transceiver2.Sender, Is.Not.Null);
+            peer.Dispose();
+        }
+
 
         [Test]
         [Category("PeerConnection")]
@@ -561,8 +683,7 @@ namespace Unity.WebRTC.RuntimeTest
             Assert.True(op2.IsDone);
             Assert.True(op2.IsError);
             Assert.IsNotEmpty(op2.Error.message);
-
-            peer.RemoveTrack(sender);
+            Assert.That(peer.RemoveTrack(sender), Is.EqualTo(RTCErrorType.None));
             track.Dispose();
             stream.Dispose();
             peer.Close();
@@ -667,7 +788,7 @@ namespace Unity.WebRTC.RuntimeTest
         public IEnumerator AddIceCandidate()
         {
             RTCConfiguration config = default;
-            config.iceServers = new[] {new RTCIceServer {urls = new[] {"stun:stun.l.google.com:19302"}}};
+            config.iceServers = new[] { new RTCIceServer { urls = new[] { "stun:stun.l.google.com:19302" } } };
             var peer1 = new RTCPeerConnection(ref config);
             var peer2 = new RTCPeerConnection(ref config);
 
@@ -822,9 +943,9 @@ namespace Unity.WebRTC.RuntimeTest
             var op6 = peer1.SetRemoteDescription(ref desc);
             yield return op6;
 
-            var op7 = new WaitUntilWithTimeout( () =>
-                    state1 == RTCPeerConnectionState.Connected &&
-                    state2 == RTCPeerConnectionState.Connected, 5000);
+            var op7 = new WaitUntilWithTimeout(() =>
+                   state1 == RTCPeerConnectionState.Connected &&
+                   state2 == RTCPeerConnectionState.Connected, 5000);
             yield return op7;
             Assert.That(op7.IsCompleted, Is.True);
 
@@ -909,7 +1030,7 @@ namespace Unity.WebRTC.RuntimeTest
         public IEnumerator RestartIceInvokeOnNegotiationNeeded()
         {
             RTCConfiguration config = default;
-            config.iceServers = new[] {new RTCIceServer {urls = new[] {"stun:stun.l.google.com:19302"}}};
+            config.iceServers = new[] { new RTCIceServer { urls = new[] { "stun:stun.l.google.com:19302" } } };
             var peer1 = new RTCPeerConnection(ref config);
             var peer2 = new RTCPeerConnection(ref config);
 
@@ -952,7 +1073,7 @@ namespace Unity.WebRTC.RuntimeTest
         public IEnumerator RemoteOnRemoveTrack()
         {
             RTCConfiguration config = default;
-            config.iceServers = new[] {new RTCIceServer {urls = new[] {"stun:stun.l.google.com:19302"}}};
+            config.iceServers = new[] { new RTCIceServer { urls = new[] { "stun:stun.l.google.com:19302" } } };
             var peer1 = new RTCPeerConnection(ref config);
             var peer2 = new RTCPeerConnection(ref config);
 

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -10,7 +11,6 @@ namespace Unity.WebRTC.Samples
         [SerializeField] private Button startButton;
         [SerializeField] private Button callButton;
         [SerializeField] private Button hangUpButton;
-        [SerializeField] private Vector2Int streamingSize;
         [SerializeField] private Camera cam;
         [SerializeField] private RawImage sourceImage;
         [SerializeField] private RawImage receiveImage1;
@@ -32,7 +32,7 @@ namespace Unity.WebRTC.Samples
 
         private void Awake()
         {
-            WebRTC.Initialize(WebRTCSettings.EncoderType, WebRTCSettings.LimitTextureSize);
+            WebRTC.Initialize(WebRTCSettings.LimitTextureSize);
         }
 
         private void OnDestroy()
@@ -66,7 +66,7 @@ namespace Unity.WebRTC.Samples
             Debug.Log("Set up source/receive streams");
             sourceStream = new MediaStream();
 
-            var videoTrack = cam.CaptureStreamTrack(streamingSize.x, streamingSize.y, 0);
+            var videoTrack = cam.CaptureStreamTrack(WebRTCSettings.StreamSize.x, WebRTCSettings.StreamSize.y, 0);
             sourceStream.AddTrack(videoTrack);
             sourceImage.texture = cam.targetTexture;
 
@@ -99,11 +99,8 @@ namespace Unity.WebRTC.Samples
                 if (e.Track is AudioStreamTrack audioTrack)
                 {
                     receiveAudio1.SetTrack(audioTrack);
-                    audioTrack.OnAudioReceived += renderer =>
-                    {
-                        renderer.loop = true;
-                        renderer.Play();
-                    };
+                    receiveAudio1.loop = true;
+                    receiveAudio1.Play();
                 }
             };
             pc1Local.OnIceCandidate = candidate => pc1Remote.AddIceCandidate(candidate);
@@ -125,21 +122,46 @@ namespace Unity.WebRTC.Samples
                 if (e.Track is AudioStreamTrack audioTrack)
                 {
                     receiveAudio2.SetTrack(audioTrack);
-                    audioTrack.OnAudioReceived += renderer =>
-                    {
-                        renderer.loop = true;
-                        renderer.Play();
-                    };
+                    receiveAudio2.loop = true;
+                    receiveAudio2.Play();
                 }
             };
             pc2Local.OnIceCandidate = candidate => pc2Remote.AddIceCandidate(candidate);
             pc2Remote.OnIceCandidate = candidate => pc2Local.AddIceCandidate(candidate);
             Debug.Log("pc2: created local and remote peer connection object");
 
+            var pc1VideoSenders = new List<RTCRtpSender>();
+            var pc2VideoSenders = new List<RTCRtpSender>();
             foreach (var track in sourceStream.GetTracks())
             {
-                pc1Local.AddTrack(track, sourceStream);
-                pc2Local.AddTrack(track, sourceStream);
+                var pc1Sender = pc1Local.AddTrack(track, sourceStream);
+                var pc2Sender = pc2Local.AddTrack(track, sourceStream);
+
+                if (track.Kind == TrackKind.Video)
+                {
+                    pc1VideoSenders.Add(pc1Sender);
+                    pc2VideoSenders.Add(pc2Sender);
+                }
+            }
+
+            if (WebRTCSettings.UseVideoCodec != null)
+            {
+                var codecs = new[] {WebRTCSettings.UseVideoCodec};
+                foreach (var transceiver in pc1Local.GetTransceivers())
+                {
+                    if (pc1VideoSenders.Contains(transceiver.Sender))
+                    {
+                        transceiver.SetCodecPreferences(codecs);
+                    }
+                }
+
+                foreach (var transceiver in pc2Local.GetTransceivers())
+                {
+                    if (pc2VideoSenders.Contains(transceiver.Sender))
+                    {
+                        transceiver.SetCodecPreferences(codecs);
+                    }
+                }
             }
 
             Debug.Log("Adding local stream to pc1Local/pc2Local");

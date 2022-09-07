@@ -1,39 +1,32 @@
 #pragma once
 
+#include <api/media_stream_interface.h>
+#include <api/rtc_error.h>
+
+struct IUnityInterfaces;
+
 namespace unity
 {
 namespace webrtc
 {
 
-    namespace webrtc = ::webrtc;
+    using namespace ::webrtc;
 
     class Context;
     class PeerConnectionObject;
     class UnityVideoRenderer;
+    class AudioTrackSinkAdapter;
     enum class RTCSdpType;
     enum class RTCPeerConnectionEventType;
     struct MediaStreamEvent;
 
-    using DelegateDebugLog = void(*)(const char*);
-    using DelegateSetResolution = void(*)(int32*, int32*);
-    using DelegateMediaStreamOnAddTrack =
-        void(*)(webrtc::MediaStreamInterface*, webrtc::MediaStreamTrackInterface*);
-    using DelegateMediaStreamOnRemoveTrack =
-        void(*)(webrtc::MediaStreamInterface*, webrtc::MediaStreamTrackInterface*);
-    using DelegateSetSessionDescSuccess = void(*)(PeerConnectionObject*);
-    using DelegateSetSessionDescFailure =
-        void(*)(PeerConnectionObject*, webrtc::RTCErrorType, const char*);
-    using DelegateAudioReceive =
-        void(*)(webrtc::AudioTrackInterface* track,
-            const void* audio_data,
-            int size,
-            int sample_rate,
-            int number_of_channels,
-            int number_of_frames);
-    using DelegateVideoFrameResize =
-        void(*)(UnityVideoRenderer* renderer,
-            int width,
-            int height);
+    using DelegateDebugLog = void (*)(const char*);
+    using DelegateSetResolution = void (*)(int32_t*, int32_t*);
+    using DelegateMediaStreamOnAddTrack = void (*)(MediaStreamInterface*, MediaStreamTrackInterface*);
+    using DelegateMediaStreamOnRemoveTrack = void (*)(MediaStreamInterface*, MediaStreamTrackInterface*);
+    using DelegateSetSessionDescSuccess = void (*)(PeerConnectionObject*);
+    using DelegateSetSessionDescFailure = void (*)(PeerConnectionObject*, RTCErrorType, const char*);
+    using DelegateVideoFrameResize = void (*)(UnityVideoRenderer* renderer, int width, int height);
 
     void debugLog(const char* buf);
     extern DelegateDebugLog delegateDebugLog;
@@ -157,6 +150,15 @@ namespace webrtc
         bool iceRestart;
         bool voiceActivityDetection;
     };
-    
+
+    class IGraphicsDevice;
+    class ProfilerMarkerFactory;
+    class Plugin
+    {
+    public:
+        static IGraphicsDevice* GraphicsDevice();
+        static ProfilerMarkerFactory* ProfilerMarkerFactory();
+    };
+
 } // end namespace webrtc
 } // end namespace unity

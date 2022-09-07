@@ -27,6 +27,11 @@ body:
         What version of the package are you using?
         You can check the Unity version in Package Manager Window. See [manual](https://docs.unity3d.com/Manual/upm-ui.html).
       options:
+        - 2.4.0-exp.10
+        - 2.4.0-exp.9
+        - 2.4.0-exp.8
+        - 2.4.0-exp.7
+        - 2.4.0-exp.6
         - 2.4.0-exp.5
         - 2.4.0-exp.4
         - 2.4.0-exp.3
@@ -44,7 +49,7 @@ body:
         Please describe your environment when the issue occurred.
         Example:
           - **OS**: Windows10
-          - **Unity version**: Unity 2021.2
+          - **Unity version**: Unity 2021.3
       value: |
           * OS:
           * Unity version:

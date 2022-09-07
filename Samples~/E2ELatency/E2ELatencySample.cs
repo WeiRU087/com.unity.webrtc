@@ -17,7 +17,6 @@ class E2ELatencySample : MonoBehaviour
     [SerializeField] private Text textRemoteTimestamp;
     [SerializeField] private Text textLatency;
     [SerializeField] private Text textAverageLatency;
-    [SerializeField] private Dropdown dropDownResolution;
     [SerializeField] private Dropdown dropDownFramerate;
 
     [SerializeField] private BarcodeEncoder encoder;
@@ -44,15 +43,6 @@ class E2ELatencySample : MonoBehaviour
     int vSyncCount;
     int targetFrameRate;
 
-    List<Vector2Int> listResolution = new List<Vector2Int>()
-    {
-        new Vector2Int(160, 90),
-        new Vector2Int(320, 180),
-        new Vector2Int(640, 360),
-        new Vector2Int(1280, 720),
-        new Vector2Int(1920, 1080),
-    };
-
     List<int> listFramerate = new List<int>()
     {
         15,
@@ -63,7 +53,7 @@ class E2ELatencySample : MonoBehaviour
 
     private void Awake()
     {
-        WebRTC.Initialize(WebRTCSettings.EncoderType, WebRTCSettings.LimitTextureSize);
+        WebRTC.Initialize(WebRTCSettings.LimitTextureSize);
         startButton.onClick.AddListener(OnStart);
         callButton.onClick.AddListener(OnCall);
         hangUpButton.onClick.AddListener(OnHangUp);
@@ -89,15 +79,12 @@ class E2ELatencySample : MonoBehaviour
 
         callButton.interactable = false;
         hangUpButton.interactable = false;
-        dropDownResolution.interactable = true;
-        dropDownResolution.options =
-            listResolution.Select(_ => new Dropdown.OptionData($"{_.x}x{_.y}")).ToList();
-        dropDownResolution.value = 3;
         dropDownFramerate.interactable = true;
         dropDownFramerate.options =
             listFramerate.Select(_ => new Dropdown.OptionData($"{_}")).ToList();
         dropDownFramerate.value = 1;
         dropDownFramerate.onValueChanged.AddListener(OnFramerateChanged);
+        OnFramerateChanged(dropDownFramerate.value);
 
         pc1OnIceConnectionChange = state => { OnIceConnectionChange(_pc1, state); };
         pc2OnIceConnectionChange = state => { OnIceConnectionChange(_pc2, state); };
@@ -116,7 +103,7 @@ class E2ELatencySample : MonoBehaviour
     {
         // Set "Don't Sync" for changing framerate,
         // but iOS ignores this setting
-        QualitySettings.vSyncCount = 0; 
+        QualitySettings.vSyncCount = 0;
         Application.targetFrameRate = listFramerate[value];
     }
 
@@ -124,13 +111,11 @@ class E2ELatencySample : MonoBehaviour
     {
         startButton.interactable = false;
         callButton.interactable = true;
-        dropDownResolution.interactable = false;
         dropDownFramerate.interactable = false;
         if (sendStream == null)
         {
-            Vector2Int resolution = listResolution[dropDownResolution.value];
-            int width = resolution.x;
-            int height = resolution.y;
+            int width = WebRTCSettings.StreamSize.x;
+            int height = WebRTCSettings.StreamSize.y;
             var format = WebRTC.GetSupportedGraphicsFormat(SystemInfo.graphicsDeviceType);
             var tex = new RenderTexture(width, height, 0, format);
             tex.Create();
@@ -205,6 +190,10 @@ class E2ELatencySample : MonoBehaviour
         if (state == RTCIceConnectionState.Connected || state == RTCIceConnectionState.Completed)
         {
             StartCoroutine(CheckStats(pc));
+            foreach(var sender in _pc1.GetSenders())
+            {
+                ChangeFramerate(sender, (uint)Application.targetFrameRate);
+            }
         }
     }
 
@@ -279,9 +268,37 @@ class E2ELatencySample : MonoBehaviour
 
     private void AddTracks()
     {
+        var pc1VideoSenders = new List<RTCRtpSender>();
         foreach (var track in sendStream.GetTracks())
         {
-            _pc1.AddTrack(track, sendStream);
+            var sender = _pc1.AddTrack(track, sendStream);
+            if (track.Kind == TrackKind.Video)
+            {
+                pc1VideoSenders.Add(sender);
+            }
+        }
+
+        if (WebRTCSettings.UseVideoCodec != null)
+        {
+            var codecs = new[] {WebRTCSettings.UseVideoCodec};
+            foreach (var transceiver in _pc1.GetTransceivers())
+            {
+                if (pc1VideoSenders.Contains(transceiver.Sender))
+                {
+                    transceiver.SetCodecPreferences(codecs);
+                }
+            }
+        }
+    }
+
+    private void ChangeFramerate(RTCRtpSender sender, uint framerate)
+    {
+        RTCRtpSendParameters parameters = sender.GetParameters();
+        parameters.encodings[0].maxFramerate = framerate;
+        RTCError error = sender.SetParameters(parameters);
+        if (error.errorType != RTCErrorType.None)
+        {
+            Debug.LogErrorFormat("RTCRtpSender.SetParameters failed {0}", error.errorType);
         }
     }
 
@@ -342,7 +359,6 @@ class E2ELatencySample : MonoBehaviour
         startButton.interactable = true;
         callButton.interactable = false;
         hangUpButton.interactable = false;
-        dropDownResolution.interactable = true;
         dropDownFramerate.interactable = true;
         receiveImage.color = Color.black;
     }

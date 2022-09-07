@@ -1,67 +1,109 @@
 #include "pch.h"
-#include "UnityVideoDecoderFactory.h"
-#include "absl/strings/match.h"
 
-#if UNITY_OSX || UNITY_IOS
-#import "sdk/objc/components/video_codec/RTCDefaultVideoDecoderFactory.h"
-#import "sdk/objc/native/api/video_decoder_factory.h"
-#elif UNITY_ANDROID
-#include "Codec/AndroidCodec/android_codec_factory_helper.h"
-#endif
+#include <media/engine/internal_decoder_factory.h>
+#include <modules/video_coding/include/video_error_codes.h>
+
+#include "Codec/CreateVideoCodecFactory.h"
+#include "GraphicsDevice/GraphicsUtility.h"
+#include "ProfilerMarkerFactory.h"
+#include "ScopedProfiler.h"
+#include "UnityVideoDecoderFactory.h"
 
 namespace unity
 {
 namespace webrtc
 {
-    webrtc::VideoDecoderFactory* CreateDecoderFactory()
+    class UnityVideoDecoder : public VideoDecoder
     {
-#if UNITY_OSX || UNITY_IOS
-        return webrtc::ObjCToNativeVideoDecoderFactory(
-            [[RTCDefaultVideoDecoderFactory alloc] init]).release();
-#elif UNITY_ANDROID
-        return CreateAndroidDecoderFactory().release();
-#else
-        return new webrtc::InternalDecoderFactory();
-#endif
+    public:
+        UnityVideoDecoder(std::unique_ptr<VideoDecoder> decoder, ProfilerMarkerFactory* profiler)
+            : decoder_(std::move(decoder))
+            , profiler_(profiler)
+            , marker_(nullptr)
+            , profilerThread_(nullptr)
+        {
+            if (profiler)
+                marker_ = profiler->CreateMarker(
+                    "UnityVideoDecoder.Decode", kUnityProfilerCategoryOther, kUnityProfilerMarkerFlagDefault, 0);
+        }
+        ~UnityVideoDecoder() override { }
+
+        int32_t InitDecode(const VideoCodec* codec_settings, int32_t number_of_cores) override
+        {
+            int32_t result = decoder_->InitDecode(codec_settings, number_of_cores);
+            if (result >= WEBRTC_VIDEO_CODEC_OK && !profilerThread_)
+            {
+                std::stringstream ss;
+                ss << "Decoder ";
+                ss
+                    << (decoder_->GetDecoderInfo().implementation_name.empty()
+                            ? "VideoDecoder"
+                            : decoder_->GetDecoderInfo().implementation_name);
+                ss << "(" << CodecTypeToPayloadString(codec_settings->codecType) << ")";
+                profilerThread_ = profiler_->CreateScopedProfilerThread("WebRTC", ss.str().c_str());
+            }
+
+            return result;
+        }
+        int32_t Decode(const EncodedImage& input_image, bool missing_frames, int64_t render_time_ms) override
+        {
+            int32_t result;
+            {
+                std::unique_ptr<const ScopedProfiler> profiler;
+                if (profiler_)
+                    profiler = profiler_->CreateScopedProfiler(*marker_);
+                result = decoder_->Decode(input_image, missing_frames, render_time_ms);
+            }
+            return result;
+        }
+        int32_t RegisterDecodeCompleteCallback(DecodedImageCallback* callback) override
+        {
+            return decoder_->RegisterDecodeCompleteCallback(callback);
+        }
+        int32_t Release() override { return decoder_->Release(); }
+        DecoderInfo GetDecoderInfo() const override { return decoder_->GetDecoderInfo(); }
+
+    private:
+        std::unique_ptr<VideoDecoder> decoder_;
+        ProfilerMarkerFactory* profiler_;
+        const UnityProfilerMarkerDesc* marker_;
+        std::unique_ptr<const ScopedProfilerThread> profilerThread_;
+    };
+
+    UnityVideoDecoderFactory::UnityVideoDecoderFactory(IGraphicsDevice* gfxDevice, ProfilerMarkerFactory* profiler)
+        : profiler_(profiler)
+        , factories_()
+    {
+        const std::vector<std::string> arrayImpl = {
+            kInternalImpl, kNvCodecImpl, kAndroidMediaCodecImpl, kVideoToolboxImpl
+        };
+
+        for (auto impl : arrayImpl)
+        {
+            auto factory = CreateVideoDecoderFactory(impl, gfxDevice, profiler);
+            if (factory)
+                factories_.emplace(impl, factory);
+        }
     }
 
-    UnityVideoDecoderFactory::UnityVideoDecoderFactory(bool forTest)
-    : internal_decoder_factory_(CreateDecoderFactory())
-    , forTest_(forTest)
-    {
-    }
+    UnityVideoDecoderFactory::~UnityVideoDecoderFactory() = default;
 
     std::vector<webrtc::SdpVideoFormat> UnityVideoDecoderFactory::GetSupportedFormats() const
     {
-#if CUDA_PLATFORM
-        // todo(kazuki):: Support H.264 hardware decoder for CUDA platforms (Linux and Windows)
-        // This is a workaround to generate SDPs contains H.264 codec for unit testing.
-        // The workaround will be removed if CUDA HW decoder is supported.
-        if(forTest_)
-        {
-            return { webrtc::CreateH264Format(
-                webrtc::H264::kProfileConstrainedBaseline,
-                webrtc::H264::kLevel5_1, "1") };
-        }
-        else
-        {
-            return internal_decoder_factory_->GetSupportedFormats();
-        }
-#else
-        return internal_decoder_factory_->GetSupportedFormats();
-#endif
+        return GetSupportedFormatsInFactories(factories_);
     }
 
-    std::unique_ptr<webrtc::VideoDecoder> UnityVideoDecoderFactory::CreateVideoDecoder(const webrtc::SdpVideoFormat & format)
+    std::unique_ptr<webrtc::VideoDecoder>
+    UnityVideoDecoderFactory::CreateVideoDecoder(const webrtc::SdpVideoFormat& format)
     {
+        VideoDecoderFactory* factory = FindCodecFactory(factories_, format);
+        auto decoder = factory->CreateVideoDecoder(format);
+        if (!profiler_)
+            return decoder;
 
-        if (absl::EqualsIgnoreCase(format.name, cricket::kAv1CodecName))
-        {
-            RTC_LOG(LS_INFO) << "AV1 codec is not supported";
-            return nullptr;
-        }
-        return internal_decoder_factory_->CreateVideoDecoder(format);
+        // Use Unity Profiler for measuring decoding process.
+        return std::make_unique<UnityVideoDecoder>(std::move(decoder), profiler_);
     }
 
-}  // namespace webrtc
-}  // namespace unity
+} // namespace webrtc
+} // namespace unity

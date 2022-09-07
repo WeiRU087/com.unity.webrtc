@@ -13,8 +13,7 @@ namespace Unity.WebRTC.RuntimeTest
         [SetUp]
         public void SetUp()
         {
-            var type = TestHelper.HardwareCodecSupport() ? EncoderType.Hardware : EncoderType.Software;
-            WebRTC.Initialize(type: type, limitTextureSize: true, forTest: true);
+            WebRTC.Initialize(true);
         }
 
         [TearDown]
@@ -131,7 +130,7 @@ namespace Unity.WebRTC.RuntimeTest
             Assert.False(track.Enabled);
 
             // ReadyState property
-            Assert.AreEqual(track.ReadyState, TrackState.Live);
+            Assert.That(track.ReadyState, Is.EqualTo(TrackState.Live));
 
             track.Dispose();
 

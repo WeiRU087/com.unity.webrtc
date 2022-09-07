@@ -8,8 +8,6 @@ target_sources(WebRTCLib
     DataChannelObject.h
     DummyAudioDevice.cpp
     DummyAudioDevice.h
-    DummyVideoEncoder.cpp
-    DummyVideoEncoder.h
     AudioTrackSinkAdapter.h
     AudioTrackSinkAdapter.cpp
     Logger.cpp
@@ -22,11 +20,21 @@ target_sources(WebRTCLib
     PeerConnectionStatsCollectorCallback.cpp
     PeerConnectionStatsCollectorCallback.h
     PlatformBase.h
+    ProfilerMarkerFactory.cpp
+    ProfilerMarkerFactory.h
     SetSessionDescriptionObserver.cpp
     SetSessionDescriptionObserver.h
     ScopedProfiler.h
     ScopedProfiler.cpp
     targetver.h
+    UnityAudioDecoderFactory.cpp
+    UnityAudioDecoderFactory.h
+    UnityAudioEncoderFactory.cpp
+    UnityAudioEncoderFactory.h
+    UnityAudioTrackSource.cpp
+    UnityAudioTrackSource.h
+    UnityProfilerInterfaceFunctions.cpp
+    UnityProfilerInterfaceFunctions.h
     UnityVideoDecoderFactory.cpp
     UnityVideoDecoderFactory.h
     UnityVideoEncoderFactory.cpp
@@ -35,17 +43,48 @@ target_sources(WebRTCLib
     UnityVideoRenderer.h
     UnityVideoTrackSource.cpp
     UnityVideoTrackSource.h
-    UnityAudioDecoderFactory.cpp
-    UnityAudioDecoderFactory.h
-    UnityAudioEncoderFactory.cpp
-    UnityAudioEncoderFactory.h
-    UnityAudioTrackSource.cpp
-    UnityAudioTrackSource.h
-    WebRTCConstants.h
     WebRTCMacros.h
     WebRTCPlugin.h
     UnityLogStream.h
     UnityLogStream.cpp
+    VideoFrame.cpp
+    VideoFrame.h
+    VideoFrameAdapter.cpp
+    VideoFrameAdapter.h
+    VideoFrameScheduler.cpp
+    VideoFrameScheduler.h
+    VideoFrameUtil.cpp
+    VideoFrameUtil.h
+    GpuMemoryBuffer.cpp
+    GpuMemoryBuffer.h
+    GpuMemoryBufferPool.cpp
+    GpuMemoryBufferPool.h
+)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # Visual Studio Generator has not been supported supression warnings of external headers yet.
+  # https://gitlab.kitware.com/cmake/cmake/-/issues/17904
+  if(CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(VISUALSTUDIO_GENERATOR 1)
+  else()
+    set(VISUALSTUDIO_GENERATOR 0)
+  endif()
+
+  target_compile_options(WebRTCLib
+    PUBLIC
+      $<$<NOT:${VISUALSTUDIO_GENERATOR}>:-Werror>
+      $<${VISUALSTUDIO_GENERATOR}:-Wno-c++98-compat>
+      $<${VISUALSTUDIO_GENERATOR}:-Wno-c++98-compat-pedantic>
+      -Wall
+      -Wextra
+      -Wformat=2
+      -Wno-unused-parameter
+  )
+endif()
+
+target_compile_definitions(WebRTCLib
+  PUBLIC 
+    $<$<CONFIG:Debug>:DEBUG>
 )
 
 if(iOS OR macOS)
@@ -53,14 +92,20 @@ if(iOS OR macOS)
     PRIVATE
       ../libcxx/debug.cpp
   )
+else()
+  target_sources(WebRTCLib
+    PRIVATE
+    UnityVulkanInterfaceFunctions.cpp
+    UnityVulkanInterfaceFunctions.h
+  )
+endif()
+
+if(Android)
+  add_subdirectory(Android)
 endif()
 
 add_subdirectory(Codec)
 add_subdirectory(GraphicsDevice)
-
-if(Linux)
-  add_subdirectory(Dynlink)
-endif()
 
 if(Windows)
   # Force to always compile with W4
@@ -74,13 +119,6 @@ if(Windows)
                    CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
     string(REPLACE /GR /GR- "${flag_var}" "${${flag_var}}")
   endforeach()
-endif()
-
-if(UNIX)
-  target_compile_options(WebRTCLib 
-    PUBLIC
-      -Wall -Wextra -Wno-unknown-pragmas -Wno-unused-parameter -Wno-missing-field-initializers -Wno-long-long
-  )
 endif()
 
 if(Windows)
@@ -111,6 +149,7 @@ if(Windows)
       Strmiids
   )
   target_include_directories(WebRTCLib
+    SYSTEM
     PUBLIC
       ${CUDA_INCLUDE_DIRS}
       ${Vulkan_INCLUDE_DIR}
@@ -145,16 +184,46 @@ elseif(macOS)
       ${FRAMEWORK_LIBS}
   )
   target_include_directories(WebRTCLib
+    SYSTEM
     PUBLIC
       ${WEBRTC_OBJC_INCLUDE_DIR}
   )
   set_target_properties(WebRTCLib
     PROPERTIES 
       LINK_FLAGS "-ObjC"
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON
   )  
 elseif(Linux)
   set(PROJECT_BINARY_DIR
     "${CMAKE_SOURCE_DIR}/../Runtime/Plugins/x86_64")
+
+  set(GLAD_SOURCES_DIR "${CMAKE_SOURCE_DIR}/glad")
+  add_subdirectory("${GLAD_SOURCES_DIR}/cmake" glad_cmake)
+
+  glad_add_library(glad_gl_core_46 REPRODUCIBLE STATIC LOADER API gl:core=4.6)
+  glad_add_library(glad_vulkan_11 REPRODUCIBLE STATIC LOADER API vulkan=1.1)
+  glad_add_library(glad_glx_14 REPRODUCIBLE STATIC LOADER API glx=1.4)
+
+  set_target_properties(glad_gl_core_46
+    PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+  )
+
+  set_target_properties(glad_vulkan_11
+    PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+  )
+
+  set_target_properties(glad_glx_14
+    PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+  )
+
+  target_link_libraries(glad_glx_14
+    PUBLIC
+      glad_gl_core_46
+  )
 
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(GLIB REQUIRED glib-2.0)
@@ -166,17 +235,21 @@ elseif(Linux)
       VK_NO_PROTOTYPES
   )
   target_link_libraries(WebRTCLib
-    PRIVATE
+    PUBLIC
+      NvCodec
+      glad_gl_core_46
+      glad_vulkan_11
+      glad_glx_14
       ${WEBRTC_LIBRARY}
-      ${OPENGL_opengl_LIBRARY}
-      ${Vulkan_LIBRARY}
       ${GLIB_LIBRARIES}
   )
   target_include_directories(WebRTCLib
+    SYSTEM
     PUBLIC
       ${CUDA_INCLUDE_DIRS}
-      ${Vulkan_INCLUDE_DIR}
-      ${OPENGL_INCLUDE_DIR}
+      glad_gl_core_46
+      glad_vulkan_11
+      glad_glx_14
       ${NVCODEC_INCLUDE_DIR}
   )
 
@@ -200,6 +273,7 @@ elseif(iOS)
       WEBRTC_POSIX
   )
   target_include_directories(WebRTCLib
+    SYSTEM
     PUBLIC
       ${WEBRTC_OBJC_INCLUDE_DIR}
   )
@@ -249,15 +323,16 @@ elseif(Android)
 endif()
 
 target_include_directories(WebRTCLib
+  SYSTEM
   PUBLIC
-    .
     ${CMAKE_SOURCE_DIR}/unity/include
     ${WEBRTC_INCLUDE_DIR}
 )
 
-#
-# Configure WebRTC Unity plugin
-#
+target_include_directories(WebRTCLib
+  PUBLIC
+    .
+)
 
 if(iOS)
   add_library(WebRTCPlugin SHARED)
@@ -281,21 +356,15 @@ else()
     PRIVATE
       WebRTCLib
   )
-endif()
+endif()  
 target_sources(WebRTCPlugin 
   PRIVATE
     pch.cpp
     pch.h
     WebRTCPlugin.cpp
+    WebRTCPlugin.h
     UnityRenderEvent.cpp
 )
-
-if(Android)
-  target_sources(WebRTCPlugin
-    PRIVATE
-      Jni.cpp
-  )
-endif()
 
 # rename dll/framework filename
 set_target_properties(WebRTCPlugin
@@ -311,7 +380,7 @@ if(Windows)
   # Set linker option
   set_target_properties(WebRTCPlugin
     PROPERTIES 
-      LINK_FLAGS "/SUBSYSTEM:WINDOWS -delayload:nvcuda.dll"
+      LINK_FLAGS "/SUBSYSTEM:WINDOWS -delayload:nvcuda.dll -delayload:nvEncodeAPI64.dll -delayload:nvcuvid.dll"
       MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
   )
 endif()
@@ -320,6 +389,8 @@ if(macOS)
   set_target_properties(WebRTCPlugin
   PROPERTIES 
     LINK_FLAGS "-ObjC"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
   )
 endif()
 

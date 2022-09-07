@@ -1,21 +1,28 @@
 #pragma once
 
+#include <api/video_codecs/sdp_video_format.h>
+#include <api/video_codecs/video_decoder_factory.h>
+
 namespace unity
 {
 namespace webrtc
 {
-    namespace webrtc = ::webrtc;
+    using namespace ::webrtc;
 
-    // This class is only used for status testing.
-    class UnityVideoDecoderFactory : public webrtc::VideoDecoderFactory
+    class IGraphicsDevice;
+    class ProfilerMarkerFactory;
+    class UnityVideoDecoderFactory : public VideoDecoderFactory
     {
     public:
-        std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override;
-        std::unique_ptr<webrtc::VideoDecoder> CreateVideoDecoder(const webrtc::SdpVideoFormat& format) override;
-        UnityVideoDecoderFactory(bool forTest);
+        virtual std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override;
+        virtual std::unique_ptr<webrtc::VideoDecoder> CreateVideoDecoder(const webrtc::SdpVideoFormat& format) override;
+
+        UnityVideoDecoderFactory(IGraphicsDevice* gfxDevice, ProfilerMarkerFactory* profiler);
+        ~UnityVideoDecoderFactory() override;
+
     private:
-        const std::unique_ptr<VideoDecoderFactory> internal_decoder_factory_;
-        bool forTest_;
+        ProfilerMarkerFactory* profiler_;
+        std::map<std::string, std::unique_ptr<VideoDecoderFactory>> factories_;
     };
 }
 }

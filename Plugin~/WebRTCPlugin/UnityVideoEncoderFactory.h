@@ -1,32 +1,35 @@
 #pragma once
 
+#include <api/video_codecs/sdp_video_format.h>
+#include <api/video_codecs/video_encoder_factory.h>
+
 namespace unity
 {
 namespace webrtc
 {
-    namespace webrtc = ::webrtc;
+    using namespace ::webrtc;
 
-    class IVideoEncoderObserver;
-    class UnityVideoEncoderFactory : public webrtc::VideoEncoderFactory
+    class IGraphicsDevice;
+    class ProfilerMarkerFactory;
+    class UnityVideoEncoderFactory : public VideoEncoderFactory
     {
     public:
-        //VideoEncoderFactory
+        // VideoEncoderFactory
         // Returns a list of supported video formats in order of preference, to use
         // for signaling etc.
-        virtual std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override;
+        virtual std::vector<SdpVideoFormat> GetSupportedFormats() const override;
         // Returns information about how this format will be encoded. The specified
         // format must be one of the supported formats by this factory.
-        virtual CodecInfo QueryVideoEncoder(const webrtc::SdpVideoFormat& format) const override;
+        virtual CodecInfo QueryVideoEncoder(const SdpVideoFormat& format) const override;
         // Creates a VideoEncoder for the specified format.
-        virtual std::unique_ptr<webrtc::VideoEncoder> CreateVideoEncoder(const webrtc::SdpVideoFormat& format) override;
+        virtual std::unique_ptr<VideoEncoder> CreateVideoEncoder(const SdpVideoFormat& format) override;
 
-        virtual std::vector<webrtc::SdpVideoFormat> GetHardwareEncoderFormats() const;
+        UnityVideoEncoderFactory(IGraphicsDevice* gfxDevice, ProfilerMarkerFactory* profiler);
+        ~UnityVideoEncoderFactory() override;
 
-        UnityVideoEncoderFactory(IVideoEncoderObserver* observer);
-        ~UnityVideoEncoderFactory();
     private:
-        IVideoEncoderObserver* m_observer;
-        std::unique_ptr<VideoEncoderFactory> internal_encoder_factory_;
+        ProfilerMarkerFactory* profiler_;
+        std::map<std::string, std::unique_ptr<VideoEncoderFactory>> factories_;
     };
 }
 }

@@ -1,12 +1,16 @@
 using UnityEngine;
 
-public class BarcodeDecoder : MonoBehaviour
+class BarcodeDecoder : MonoBehaviour
 {
     [SerializeField] int Row;
     [SerializeField] int Column;
     [SerializeField] ComputeShader Shader;
 
+#if UNITY_2020_1_OR_NEWER
     GraphicsBuffer readbackBuffer_;
+#else
+    ComputeBuffer readbackBuffer_;
+#endif
     int kernelIndex_;
     Color[] data_;
 
@@ -14,8 +18,13 @@ public class BarcodeDecoder : MonoBehaviour
     {
         int count = Row * Column;
         int stride = sizeof(float) * 4;
+#if UNITY_2020_1_OR_NEWER
         readbackBuffer_ =
             new GraphicsBuffer(GraphicsBuffer.Target.Structured, count, stride);
+#else
+        readbackBuffer_ =
+            new ComputeBuffer(count, stride, ComputeBufferType.Structured);
+#endif
         data_ = new Color[count];
         kernelIndex_ = Shader.FindKernel("Read");
     }

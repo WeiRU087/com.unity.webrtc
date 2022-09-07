@@ -37,12 +37,9 @@ class ChangeCodecsSample : MonoBehaviour
     private readonly string[] excludeCodecMimeType = { "video/red", "video/ulpfec", "video/rtx" };
     private RTCRtpCodecCapability[] availableCodecs;
 
-    private const int width = 1280;
-    private const int height = 720;
-
     private void Awake()
     {
-        WebRTC.Initialize(WebRTCSettings.EncoderType, WebRTCSettings.LimitTextureSize);
+        WebRTC.Initialize(WebRTCSettings.LimitTextureSize);
         startButton.onClick.AddListener(OnStart);
         callButton.onClick.AddListener(Call);
         hangUpButton.onClick.AddListener(HangUp);
@@ -233,7 +230,7 @@ class ChangeCodecsSample : MonoBehaviour
 
         if (videoStream == null)
         {
-            videoStream = cam.CaptureStream(width, height, 1000000);
+            videoStream = cam.CaptureStream(WebRTCSettings.StreamSize.x, WebRTCSettings.StreamSize.y, 1000000);
         }
         sourceImage.texture = cam.targetTexture;
         sourceImage.color = Color.white;
@@ -391,23 +388,46 @@ class ChangeCodecsSample : MonoBehaviour
 
         RTCStatsReport report = op.Value;
 
-        IEnumerable<RTCOutboundRTPStreamStats> outBoundStatsList = report.Stats.Values.Where(
-            stats => stats.Type == RTCStatsType.OutboundRtp).Cast<RTCOutboundRTPStreamStats>();
+        List<RTCOutboundRTPStreamStats> outBoundStatsList = report.Stats.Values.Where(
+            stats => stats.Type == RTCStatsType.OutboundRtp).Cast<RTCOutboundRTPStreamStats>().ToList();
 
-        RTCOutboundRTPStreamStats outBoundStats = outBoundStatsList.First(stats => stats.kind == "video");
+        if (!outBoundStatsList.Any())
+        {
+            Debug.LogWarning($"{nameof(RTCStatsReport)} don't contain any {nameof(RTCOutboundRTPStreamStats)}");
+            yield break;
+        }
+
+        RTCOutboundRTPStreamStats outBoundStats = outBoundStatsList.FirstOrDefault(stats => stats.kind == "video");
+        if (outBoundStats == null)
+        {
+            Debug.LogWarning($"{nameof(RTCOutboundRTPStreamStats)} with kind video is not included in {nameof(outBoundStatsList)}.");
+            yield break;
+        }
+
         string codecId = outBoundStats.codecId;
-
         List<RTCCodecStats> codecStatsList = report.Stats.Values.Where(
             stats => stats.Type == RTCStatsType.Codec).Cast<RTCCodecStats>().ToList();
 
+        if (!codecStatsList.Any())
+        {
+            Debug.LogWarning($"{nameof(RTCOutboundRTPStreamStats)} don't contain any {nameof(RTCCodecStats)}");
+            yield break;
+        }
+
         RTCCodecStats codecStats =
-            codecStatsList.First(stats => stats.Id == codecId);
+            codecStatsList.FirstOrDefault(stats => stats.Id == codecId);
+        if (codecStats == null)
+        {
+            Debug.LogWarning($"{nameof(RTCCodecStats)} with codecId {codecId} is not included in {nameof(codecStatsList)}.");
+            yield break;
+        }
+
 
         actualCodecText.text = string.Format("Using {0} {1}, payloadType={2}.",
             codecStats.mimeType,
             codecStats.sdpFmtpLine,
             codecStats.payloadType
-            );
+        );
     }
 
     private static void OnCreateSessionDescriptionError(RTCError error)

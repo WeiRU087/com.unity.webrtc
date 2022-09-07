@@ -20,7 +20,6 @@ namespace Unity.WebRTC.Samples
         [SerializeField] private Dropdown micListDropdown;
         [SerializeField] private Camera cam;
         [SerializeField] private AudioClip clip;
-        [SerializeField] private Vector2Int streamSize = new Vector2Int(1280, 720);
         [SerializeField] private RawImage sourceImage;
         [SerializeField] private AudioSource sourceAudio;
         [SerializeField] private RawImage receiveImage;
@@ -43,7 +42,7 @@ namespace Unity.WebRTC.Samples
 
         private void Awake()
         {
-            WebRTC.Initialize(WebRTCSettings.EncoderType, WebRTCSettings.LimitTextureSize);
+            WebRTC.Initialize(WebRTCSettings.LimitTextureSize);
             callButton.onClick.AddListener(Call);
             hangUpButton.onClick.AddListener(HangUp);
             addTracksButton.onClick.AddListener(AddTracks);
@@ -94,11 +93,8 @@ namespace Unity.WebRTC.Samples
                 if (e.Track is AudioStreamTrack audioTrack)
                 {
                     receiveAudio.SetTrack(audioTrack);
-                    audioTrack.OnAudioReceived += renderer =>
-                    {
-                        renderer.loop = true;
-                        renderer.Play();
-                    };
+                    receiveAudio.loop = true;
+                    receiveAudio.Play();
                     receiveAudioStream = e.Streams.First();
                     receiveAudioStream.OnRemoveTrack = ev =>
                     {
@@ -185,8 +181,17 @@ namespace Unity.WebRTC.Samples
 
         private void AddTracks()
         {
-            pc1Senders.Add(_pc1.AddTrack(videoStreamTrack));
+            var videoSender = _pc1.AddTrack(videoStreamTrack);
+            pc1Senders.Add(videoSender);
             pc1Senders.Add(_pc1.AddTrack(audioStreamTrack));
+
+            if (WebRTCSettings.UseVideoCodec != null)
+            {
+                var codecs = new[] {WebRTCSettings.UseVideoCodec};
+                var transceiver = _pc1.GetTransceivers().First(t => t.Sender == videoSender);
+                transceiver.SetCodecPreferences(codecs);
+            }
+
             addTracksButton.interactable = false;
             removeTracksButton.interactable = true;
         }
@@ -274,7 +279,7 @@ namespace Unity.WebRTC.Samples
         {
             if (!useWebCamToggle.isOn)
             {
-                videoStreamTrack = cam.CaptureStreamTrack(streamSize.x, streamSize.y, 0);
+                videoStreamTrack = cam.CaptureStreamTrack(WebRTCSettings.StreamSize.x, WebRTCSettings.StreamSize.y, 0);
                 sourceImage.texture = cam.targetTexture;
                 yield break;
             }
@@ -293,7 +298,7 @@ namespace Unity.WebRTC.Samples
             }
 
             WebCamDevice userCameraDevice = WebCamTexture.devices[webCamListDropdown.value];
-            webCamTexture = new WebCamTexture(userCameraDevice.name, streamSize.x, streamSize.y, 30);
+            webCamTexture = new WebCamTexture(userCameraDevice.name, WebRTCSettings.StreamSize.x, WebRTCSettings.StreamSize.y, 30);
             webCamTexture.Play();
             yield return new WaitUntil(() => webCamTexture.didUpdateThisFrame);
 

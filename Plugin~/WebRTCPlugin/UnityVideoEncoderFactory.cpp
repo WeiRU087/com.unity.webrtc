@@ -1,107 +1,164 @@
 #include "pch.h"
+
+#include <media/engine/internal_encoder_factory.h>
+#include <modules/video_coding/include/video_error_codes.h>
+#include <tuple>
+
+#include "Codec/CreateVideoCodecFactory.h"
+#include "GraphicsDevice/GraphicsUtility.h"
+#include "ProfilerMarkerFactory.h"
+#include "ScopedProfiler.h"
 #include "UnityVideoEncoderFactory.h"
-#include "DummyVideoEncoder.h"
-
-#if UNITY_OSX || UNITY_IOS
-#import "sdk/objc/components/video_codec/RTCDefaultVideoEncoderFactory.h"
-#import "sdk/objc/native/api/video_encoder_factory.h"
-#elif UNITY_ANDROID
-#include "Codec/AndroidCodec/android_codec_factory_helper.h"
-#endif
-
-using namespace ::webrtc::H264;
 
 namespace unity
-{    
+{
 namespace webrtc
 {
-
-    bool IsFormatSupported(
-        const std::vector<webrtc::SdpVideoFormat>& supported_formats,
-        const webrtc::SdpVideoFormat& format)
+    class UnityVideoEncoder : public VideoEncoder
     {
-        for (const webrtc::SdpVideoFormat& supported_format : supported_formats)
+    public:
+        UnityVideoEncoder(std::unique_ptr<VideoEncoder> encoder, ProfilerMarkerFactory* profiler)
+            : encoder_(std::move(encoder))
+            , profiler_(profiler)
+            , marker_(nullptr)
+            , profilerThread_(nullptr)
         {
-            if (cricket::IsSameCodec(format.name, format.parameters,
-                supported_format.name,
-                supported_format.parameters))
-            {
-                return true;
-            }
+            if (profiler)
+                marker_ = profiler->CreateMarker(
+                    "UnityVideoEncoder.Encode", kUnityProfilerCategoryOther, kUnityProfilerMarkerFlagDefault, 0);
         }
-        return false;
-    }
+        ~UnityVideoEncoder() override { }
 
-    webrtc::VideoEncoderFactory* CreateEncoderFactory()
+        void SetFecControllerOverride(FecControllerOverride* fec_controller_override) override
+        {
+            encoder_->SetFecControllerOverride(fec_controller_override);
+        }
+        int32_t InitEncode(const VideoCodec* codec_settings, int32_t number_of_cores, size_t max_payload_size) override
+        {
+            int32_t result = encoder_->InitEncode(codec_settings, number_of_cores, max_payload_size);
+            if (result >= WEBRTC_VIDEO_CODEC_OK && !profilerThread_)
+            {
+                std::stringstream ss;
+                ss << "Encoder ";
+                ss
+                    << (encoder_->GetEncoderInfo().implementation_name.empty()
+                            ? "VideoEncoder"
+                            : encoder_->GetEncoderInfo().implementation_name);
+                ss << "(" << CodecTypeToPayloadString(codec_settings->codecType) << ")";
+                profilerThread_ = profiler_->CreateScopedProfilerThread("WebRTC", ss.str().c_str());
+            }
+
+            return result;
+        }
+        int InitEncode(const VideoCodec* codec_settings, const VideoEncoder::Settings& settings) override
+        {
+            int result = encoder_->InitEncode(codec_settings, settings);
+            if (result >= WEBRTC_VIDEO_CODEC_OK && !profilerThread_)
+            {
+                std::stringstream ss;
+                ss << "Encoder ";
+                ss
+                    << (encoder_->GetEncoderInfo().implementation_name.empty()
+                            ? "VideoEncoder"
+                            : encoder_->GetEncoderInfo().implementation_name);
+                ss << "(" << CodecTypeToPayloadString(codec_settings->codecType) << ")";
+                profilerThread_ = profiler_->CreateScopedProfilerThread("WebRTC", ss.str().c_str());
+            }
+
+            return result;
+        }
+        int32_t RegisterEncodeCompleteCallback(EncodedImageCallback* callback) override
+        {
+            return encoder_->RegisterEncodeCompleteCallback(callback);
+        }
+        int32_t Release() override { return encoder_->Release(); }
+        int32_t Encode(const VideoFrame& frame, const std::vector<VideoFrameType>* frame_types) override
+        {
+            int32_t result;
+            {
+                std::unique_ptr<const ScopedProfiler> profiler;
+                if (profiler_)
+                    profiler = profiler_->CreateScopedProfiler(*marker_);
+                result = encoder_->Encode(frame, frame_types);
+            }
+            return result;
+        }
+        void SetRates(const RateControlParameters& parameters) override { encoder_->SetRates(parameters); }
+        void OnPacketLossRateUpdate(float packet_loss_rate) override
+        {
+            encoder_->OnPacketLossRateUpdate(packet_loss_rate);
+        }
+        void OnRttUpdate(int64_t rtt_ms) override { encoder_->OnRttUpdate(rtt_ms); }
+        void OnLossNotification(const LossNotification& loss_notification) override
+        {
+            encoder_->OnLossNotification(loss_notification);
+        }
+        EncoderInfo GetEncoderInfo() const override { return encoder_->GetEncoderInfo(); }
+
+    private:
+        std::unique_ptr<VideoEncoder> encoder_;
+        ProfilerMarkerFactory* profiler_;
+        const UnityProfilerMarkerDesc* marker_;
+        std::unique_ptr<const ScopedProfilerThread> profilerThread_;
+    };
+
+
+    UnityVideoEncoderFactory::UnityVideoEncoderFactory(IGraphicsDevice* gfxDevice, ProfilerMarkerFactory* profiler)
+        : profiler_(profiler)
+        , factories_()
     {
-#if UNITY_OSX || UNITY_IOS
-        return webrtc::ObjCToNativeVideoEncoderFactory(
-            [[RTCDefaultVideoEncoderFactory alloc] init]).release();
-#elif UNITY_ANDROID
-        return CreateAndroidEncoderFactory().release();
-#else
-        return new webrtc::InternalEncoderFactory();
-#endif
+        const std::vector<std::string> arrayImpl = {
+            kInternalImpl, kNvCodecImpl, kAndroidMediaCodecImpl, kVideoToolboxImpl
+        };
+
+        for (auto impl : arrayImpl)
+        {
+            auto factory = CreateVideoEncoderFactory(impl, gfxDevice, profiler);
+            if (factory)
+                factories_.emplace(impl, factory);
+        }
     }
 
-    UnityVideoEncoderFactory::UnityVideoEncoderFactory(IVideoEncoderObserver* observer)
-    : internal_encoder_factory_(CreateEncoderFactory())
-
-    {
-        m_observer = observer;
-    }
-    
     UnityVideoEncoderFactory::~UnityVideoEncoderFactory() = default;
-
-    std::vector<webrtc::SdpVideoFormat> UnityVideoEncoderFactory::GetHardwareEncoderFormats() const
-    {
-#if CUDA_PLATFORM
-        return { webrtc::CreateH264Format(
-            webrtc::H264::kProfileConstrainedBaseline,
-            webrtc::H264::kLevel5_1, "1") };
-#else
-        auto formats = internal_encoder_factory_->GetSupportedFormats();
-        std::vector<webrtc::SdpVideoFormat> filtered;
-        std::copy_if(formats.begin(), formats.end(), std::back_inserter(filtered),
-            [](webrtc::SdpVideoFormat format) {
-                if(format.name.find("H264") == std::string::npos)
-                    return false;
-                return true;
-            });
-        return filtered;
-#endif
-    }
-
 
     std::vector<webrtc::SdpVideoFormat> UnityVideoEncoderFactory::GetSupportedFormats() const
     {
-        // todo(kazuki): should support codec other than h264 like vp8, vp9 and av1.
-        //
-        // std::vector <webrtc::SdpVideoFormat> formats2 = internal_encoder_factory_->GetSupportedFormats();
-        // formats.insert(formats.end(), formats2.begin(), formats2.end());
-        return GetHardwareEncoderFormats();
+        std::vector<SdpVideoFormat> supported_codecs = GetSupportedFormatsInFactories(factories_);
+
+        // Set video codec order: default video codec is VP8
+        auto findIndex = [&](webrtc::SdpVideoFormat& format) -> long
+        {
+            const std::string sortOrder[4] = { "VP8", "VP9", "H264", "AV1X" };
+            auto it = std::find(std::begin(sortOrder), std::end(sortOrder), format.name);
+            if (it == std::end(sortOrder))
+                return LONG_MAX;
+            return static_cast<long>(std::distance(std::begin(sortOrder), it));
+        };
+        std::sort(
+            supported_codecs.begin(),
+            supported_codecs.end(),
+            [&](webrtc::SdpVideoFormat& x, webrtc::SdpVideoFormat& y) -> int { return (findIndex(x) < findIndex(y)); });
+        return supported_codecs;
     }
 
-    webrtc::VideoEncoderFactory::CodecInfo UnityVideoEncoderFactory::QueryVideoEncoder(
-        const webrtc::SdpVideoFormat& format) const
+    webrtc::VideoEncoderFactory::CodecInfo
+    UnityVideoEncoderFactory::QueryVideoEncoder(const webrtc::SdpVideoFormat& format) const
     {
-        if (IsFormatSupported(GetHardwareEncoderFormats(), format))
-        {
-            return CodecInfo{ false };
-        }
-        RTC_DCHECK(IsFormatSupported(GetSupportedFormats(), format));
-        return internal_encoder_factory_->QueryVideoEncoder(format);
+        VideoEncoderFactory* factory = FindCodecFactory(factories_, format);
+        RTC_DCHECK(format.IsCodecInList(factory->GetSupportedFormats()));
+        return factory->QueryVideoEncoder(format);
     }
 
-    std::unique_ptr<webrtc::VideoEncoder> UnityVideoEncoderFactory::CreateVideoEncoder(const webrtc::SdpVideoFormat& format)
+    std::unique_ptr<webrtc::VideoEncoder>
+    UnityVideoEncoderFactory::CreateVideoEncoder(const webrtc::SdpVideoFormat& format)
     {
-#if CUDA_PLATFORM
-        if (IsFormatSupported(GetHardwareEncoderFormats(), format))
-        {
-            return std::make_unique<DummyVideoEncoder>(m_observer);
-        }
-#endif
-        return internal_encoder_factory_->CreateVideoEncoder(format);
+        VideoEncoderFactory* factory = FindCodecFactory(factories_, format);
+        auto encoder = factory->CreateVideoEncoder(format);
+        if (!profiler_)
+            return encoder;
+
+        // Use Unity Profiler for measuring encoding process.
+        return std::make_unique<UnityVideoEncoder>(std::move(encoder), profiler_);
     }
 }
 }

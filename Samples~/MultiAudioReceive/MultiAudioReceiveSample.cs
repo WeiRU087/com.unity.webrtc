@@ -37,7 +37,7 @@ namespace Unity.WebRTC.Samples
 
         private void Awake()
         {
-            WebRTC.Initialize(WebRTCSettings.EncoderType, WebRTCSettings.LimitTextureSize);
+            WebRTC.Initialize(WebRTCSettings.LimitTextureSize);
             StartCoroutine(WebRTC.Update());
             callButton.onClick.AddListener(Call);
             hangUpButton.onClick.AddListener(HangUp);
@@ -66,11 +66,8 @@ namespace Unity.WebRTC.Samples
                 {
                     var outputAudioSource = receiveObjectList[audioIndex];
                     outputAudioSource.SetTrack(track);
-                    track.OnAudioReceived += renderer =>
-                    {
-                        renderer.loop = true;
-                        renderer.Play();
-                    };
+                    outputAudioSource.loop = true;
+                    outputAudioSource.Play();
                     audioIndex++;
                 }
             };

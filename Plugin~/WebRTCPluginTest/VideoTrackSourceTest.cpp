@@ -1,11 +1,13 @@
 #include "pch.h"
-#include "GraphicsDeviceTestBase.h"
-#include "Codec/EncoderFactory.h"
-#include "Codec/IEncoder.h"
+
 #include "Context.h"
+#include "GpuMemoryBuffer.h"
 #include "GraphicsDevice/IGraphicsDevice.h"
 #include "GraphicsDevice/ITexture2D.h"
+#include "GraphicsDeviceTestBase.h"
 #include "UnityVideoTrackSource.h"
+#include "VideoFrameUtil.h"
+#include <api/task_queue/default_task_queue_factory.h>
 
 using testing::_;
 using testing::Invoke;
@@ -15,93 +17,77 @@ namespace unity
 {
 namespace webrtc
 {
-class MockVideoSink : public rtc::VideoSinkInterface<webrtc::VideoFrame>
-{
-public:
-    MOCK_METHOD1(OnFrame, void(const webrtc::VideoFrame&));
-};
+    constexpr TimeDelta kTimeout = TimeDelta::Millis(1000);
 
-const int width = 256;
-const int height = 256;
-
-class VideoTrackSourceTest : public GraphicsDeviceTestBase
-{
-public:
-    VideoTrackSourceTest() :
-        encoder_(EncoderFactory::GetInstance().Init(width, height, m_device, m_encoderType, m_textureFormat)),
-        m_texture(m_device->CreateDefaultTextureV(width, height, m_textureFormat))
+    class MockVideoSink : public rtc::VideoSinkInterface<::webrtc::VideoFrame>
     {
-        m_trackSource = new rtc::RefCountedObject<UnityVideoTrackSource>(
-            /*is_screencast=*/ false,
-            /*needs_denoising=*/ absl::nullopt);
-        m_trackSource->AddOrUpdateSink(&mock_sink_, rtc::VideoSinkWants());
-        m_trackSource->Init(m_texture->GetNativeTexturePtrV());
-        m_trackSource->SetEncoder(encoder_.get());
+    public:
+        ~MockVideoSink() override = default;
+        MOCK_METHOD(void, OnFrame, (const ::webrtc::VideoFrame&), (override));
+    };
 
-        EXPECT_NE(nullptr, m_device);
-        EXPECT_NE(nullptr, encoder_);
+    const int kWidth = 1280;
+    const int kHeight = 720;
 
-        context = std::make_unique<Context>();
-    }
-    ~VideoTrackSourceTest() override
+    class VideoTrackSourceTest : public GraphicsDeviceTestBase
     {
-        m_trackSource->RemoveSink(&mock_sink_);
-    }
-protected:
-    std::unique_ptr<IEncoder> encoder_;
-    std::unique_ptr<Context> context;
-    std::unique_ptr<ITexture2D> m_texture;
+    public:
+        VideoTrackSourceTest()
+            : m_texture(nullptr)
+            , m_taskQueueFactory(CreateDefaultTaskQueueFactory())
+        {
+            m_trackSource = UnityVideoTrackSource::Create(false, absl::nullopt, m_taskQueueFactory.get());
+            m_trackSource->AddOrUpdateSink(&sink_, rtc::VideoSinkWants());
+        }
 
-    MockVideoSink mock_sink_;
-    rtc::scoped_refptr<UnityVideoTrackSource> m_trackSource;
+        ~VideoTrackSourceTest() override { m_trackSource->RemoveSink(&sink_); }
 
-    webrtc::VideoFrame::Builder CreateBlackFrameBuilder(int width, int height)
+    protected:
+        void SetUp() override
+        {
+            if (!device())
+                GTEST_SKIP() << "The graphics driver is not installed on the device.";
+
+            m_texture.reset(device()->CreateDefaultTextureV(kWidth, kHeight, format()));
+            if (!m_texture)
+                GTEST_SKIP() << "The graphics driver cannot create a texture resource.";
+
+            ContextDependencies dependencies;
+            dependencies.device = device();
+            context = std::make_unique<Context>(dependencies);
+        }
+
+        std::unique_ptr<Context> context;
+        std::unique_ptr<ITexture2D> m_texture;
+        std::unique_ptr<TaskQueueFactory> m_taskQueueFactory;
+
+        MockVideoSink sink_;
+        rtc::scoped_refptr<UnityVideoTrackSource> m_trackSource;
+
+        ::webrtc::VideoFrame::Builder CreateBlackFrameBuilder(int width, int height)
+        {
+            rtc::scoped_refptr<webrtc::I420Buffer> buffer = webrtc::I420Buffer::Create(width, height);
+
+            webrtc::I420Buffer::SetBlack(buffer);
+            return ::webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer);
+        }
+
+        void SendTestFrame()
+        {
+            auto frame = CreateTestFrame(device(), m_texture.get(), format());
+            m_trackSource->OnFrameCaptured(std::move(frame));
+        }
+    };
+
+    TEST_P(VideoTrackSourceTest, OnFrameCaptured)
     {
-        rtc::scoped_refptr<webrtc::I420Buffer> buffer =
-            webrtc::I420Buffer::Create(width, height);
-
-        webrtc::I420Buffer::SetBlack(buffer);
-        return webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer);
+        rtc::Event done;
+        SendTestFrame();
+        EXPECT_CALL(sink_, OnFrame(_)).WillOnce(Invoke([&done](const ::webrtc::VideoFrame& frame) { done.Set(); }));
+        EXPECT_TRUE(done.Wait(kTimeout.ms()));
     }
 
-    void SendTestFrame(int width, int height)
-    {
-        m_trackSource->OnFrameCaptured(0);
-    }
-};
-
-TEST_P(VideoTrackSourceTest, CreateVideoSourceProxy)
-{
-    std::unique_ptr<rtc::Thread> workerThread = rtc::Thread::Create();
-    workerThread->Start();
-    std::unique_ptr<rtc::Thread> signalingThread = rtc::Thread::Create();
-    signalingThread->Start();
-
-    rtc::scoped_refptr<webrtc::VideoTrackSourceInterface> videoSourceProxy =
-        webrtc::VideoTrackSourceProxy::Create(
-            signalingThread.get(),
-            workerThread.get(), m_trackSource);
-}
-
-// todo::(kazuki) fix MetalGraphicsDevice.mm
-#if !defined(SUPPORT_METAL)
-TEST_P(VideoTrackSourceTest, SendTestFrame)
-{
-    int width = 256;
-    int height = 256;
-    EXPECT_CALL(mock_sink_, OnFrame(_))
-        .WillOnce(Invoke([width, height](const webrtc::VideoFrame& frame) {
-            EXPECT_EQ(width, frame.width());
-            EXPECT_EQ(height, frame.height());
-    }));
-    SendTestFrame(width, height);
-}
-#endif
-
-INSTANTIATE_TEST_CASE_P(
-    GraphicsDeviceParameters,
-    VideoTrackSourceTest,
-    testing::ValuesIn(VALUES_TEST_ENV));
+    INSTANTIATE_TEST_SUITE_P(GfxDeviceAndColorSpece, VideoTrackSourceTest, testing::ValuesIn(VALUES_TEST_ENV));
 
 } // end namespace webrtc
 } // end namespace unity

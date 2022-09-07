@@ -42,12 +42,9 @@ class PeerConnectionSample : MonoBehaviour
     private DelegateOnNegotiationNeeded pc1OnNegotiationNeeded;
     private bool videoUpdateStarted;
 
-    private const int width = 1280;
-    private const int height = 720;
-
     private void Awake()
     {
-        WebRTC.Initialize(WebRTCSettings.EncoderType, WebRTCSettings.LimitTextureSize);
+        WebRTC.Initialize(WebRTCSettings.LimitTextureSize);
         startButton.onClick.AddListener(OnStart);
         callButton.onClick.AddListener(Call);
         restartButton.onClick.AddListener(RestartIce);
@@ -97,7 +94,7 @@ class PeerConnectionSample : MonoBehaviour
 
         if (videoStream == null)
         {
-            videoStream = cam.CaptureStream(width, height, 1000000);
+            videoStream = cam.CaptureStream(WebRTCSettings.StreamSize.x, WebRTCSettings.StreamSize.y, 1000000);
         }
 
         sourceImage.texture = cam.targetTexture;
@@ -209,6 +206,18 @@ class PeerConnectionSample : MonoBehaviour
             pc1Senders.Add(_pc1.AddTrack(track, videoStream));
         }
 
+        if (WebRTCSettings.UseVideoCodec != null)
+        {
+            var codecs = new[] {WebRTCSettings.UseVideoCodec};
+            foreach (var transceiver in _pc1.GetTransceivers())
+            {
+                if (pc1Senders.Contains(transceiver.Sender))
+                {
+                    transceiver.SetCodecPreferences(codecs);
+                }
+            }
+        }
+
         if (!videoUpdateStarted)
         {
             StartCoroutine(WebRTC.Update());
@@ -225,11 +234,10 @@ class PeerConnectionSample : MonoBehaviour
 
         pc1Senders.Clear();
 
-        MediaStreamTrack[] tracks = receiveStream.GetTracks().ToArray();
+        var tracks = receiveStream.GetTracks().ToArray();
         foreach (var track in tracks)
         {
             receiveStream.RemoveTrack(track);
-            track.Dispose();
         }
     }
 

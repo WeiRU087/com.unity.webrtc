@@ -83,6 +83,7 @@ namespace Unity.WebRTC
             {
                 Close();
                 DisposeAllTransceivers();
+                WebRTC.Context.DeletePeerConnection(self);
                 WebRTC.Table.Remove(self);
                 self = IntPtr.Zero;
             }
@@ -532,11 +533,9 @@ namespace Unity.WebRTC
         public RTCRtpSender AddTrack(MediaStreamTrack track, MediaStream stream = null)
         {
             if (track == null)
-            {
-                throw new ArgumentNullException("");
-            }
+                throw new ArgumentNullException("track is null.");
 
-            var streamId = stream == null ? Guid.NewGuid().ToString() : stream.Id;
+            var streamId = stream?.Id;
             RTCErrorType error = NativeMethods.PeerConnectionAddTrack(
                 GetSelfOrThrow(), track.GetSelfOrThrow(), streamId, out var ptr);
             if (error != RTCErrorType.None)
@@ -561,10 +560,12 @@ namespace Unity.WebRTC
         /// </summary>
         /// <param name="track"></param>
         /// <returns></returns>
-        public RTCRtpTransceiver AddTransceiver(MediaStreamTrack track)
+        public RTCRtpTransceiver AddTransceiver(MediaStreamTrack track, RTCRtpTransceiverInit init = null)
         {
-            IntPtr ptr = WebRTC.Context.PeerConnectionAddTransceiver(
-                GetSelfOrThrow(), track.GetSelfOrThrow());
+            if (track == null)
+                throw new ArgumentNullException("track is null.");
+            IntPtr ptr = PeerConnectionAddTransceiver(
+                GetSelfOrThrow(), track.GetSelfOrThrow(), init);
             return CreateTransceiver(ptr);
         }
 
@@ -573,10 +574,10 @@ namespace Unity.WebRTC
         /// </summary>
         /// <param name="kind"></param>
         /// <returns></returns>
-        public RTCRtpTransceiver AddTransceiver(TrackKind kind)
+        public RTCRtpTransceiver AddTransceiver(TrackKind kind, RTCRtpTransceiverInit init = null)
         {
-            IntPtr ptr = WebRTC.Context.PeerConnectionAddTransceiverWithType(
-                GetSelfOrThrow(), kind);
+            IntPtr ptr = PeerConnectionAddTransceiverWithType(
+                GetSelfOrThrow(), kind, init);
             return CreateTransceiver(ptr);
         }
 
@@ -921,6 +922,22 @@ namespace Unity.WebRTC
                     connection.OnStatsDelivered(report);
                 }
             });
+        }
+
+        static IntPtr PeerConnectionAddTransceiver(IntPtr pc, IntPtr track, RTCRtpTransceiverInit init)
+        {
+            if (init == null)
+                return NativeMethods.PeerConnectionAddTransceiver(pc, track);
+            RTCRtpTransceiverInitInternal _init = init.Cast();
+            return NativeMethods.PeerConnectionAddTransceiverWithInit(pc, track, ref _init);
+        }
+
+        static IntPtr PeerConnectionAddTransceiverWithType(IntPtr pc, TrackKind kind, RTCRtpTransceiverInit init)
+        {
+            if (init == null)
+                return NativeMethods.PeerConnectionAddTransceiverWithType(pc, kind);
+            RTCRtpTransceiverInitInternal _init = init.Cast();
+            return NativeMethods.PeerConnectionAddTransceiverWithTypeAndInit(pc, kind, ref _init);
         }
     }
 }
