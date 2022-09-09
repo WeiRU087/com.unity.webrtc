@@ -2,3 +2,4 @@
 
 [assembly: InternalsVisibleTo("Unity.WebRTC.RuntimeTests")]
 [assembly: InternalsVisibleTo("Unity.WebRTC.EditorTests")]
+[assembly: InternalsVisibleTo("Unity.UGP.Client")]
