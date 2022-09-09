@@ -47,7 +47,7 @@ namespace webrtc
         {
             return nullptr;
         }
-        if (m_last_renderered_timestamp == m_timestamp)
+        if (m_last_renderered_timestamp == m_timestamp && m_timestamp != 0)
         {
             // skipped copying texture
             return nullptr;
