@@ -20,14 +20,14 @@ then
   git checkout "refs/remotes/branch-heads/$WEBRTC_VERSION"
   cd ..
   gclient sync -f
-fi
 
-# add jsoncpp
-patch -N "src/BUILD.gn" < "$COMMAND_DIR/patches/add_jsoncpp.patch"
+  # add jsoncpp
+  patch -N "src/BUILD.gn" < "$COMMAND_DIR/patches/add_jsoncpp.patch"
+fi
 
 mkdir -p "$ARTIFACTS_DIR/lib"
 
-for target_cpu in "arm64"
+for target_cpu in "arm64" "arm" "x64"
 do
   mkdir -p "$ARTIFACTS_DIR/lib/${target_cpu}"
 
@@ -62,10 +62,17 @@ pushd src
 
 for is_debug in "true" "false"
 do
+  OUTPUT_FOLDER=$OUTPUT_DIR/release
+  filename="libwebrtc.aar"
+  if [ $is_debug = "true" ]; then
+    filename="libwebrtc-debug.aar"
+    OUTPUT_FOLDER=$OUTPUT_DIR/debug
+  fi
+
   python tools_webrtc/android/build_aar.py \
-    --build-dir $OUTPUT_DIR \
-    --output $OUTPUT_DIR/libwebrtc.aar \
-    --arch arm64-v8a \
+    --build-dir $OUTPUT_FOLDER \
+    --output $OUTPUT_FOLDER/libwebrtc.aar \
+    --arch "armeabi-v7a" "arm64-v8a" "x86_64" \
     --extra-gn-args "is_debug=${is_debug} \
       rtc_use_h264=false \
       rtc_include_tests=false \
@@ -74,12 +81,8 @@ do
       use_rtti=true \
       use_custom_libcxx=false"
 
-  filename="libwebrtc.aar"
-  if [ $is_debug = "true" ]; then
-    filename="libwebrtc-debug.aar"
-  fi
   # copy aar
-  cp "$OUTPUT_DIR/libwebrtc.aar" "$ARTIFACTS_DIR/lib/${filename}"
+  cp "$OUTPUT_FOLDER/libwebrtc.aar" "$ARTIFACTS_DIR/lib/${filename}"
 done
 
 popd

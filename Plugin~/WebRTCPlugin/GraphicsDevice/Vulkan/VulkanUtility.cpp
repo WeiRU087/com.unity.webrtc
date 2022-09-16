@@ -214,11 +214,11 @@ namespace webrtc
         viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
         viewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
 
-        VkImageView imageView = nullptr;
+        VkImageView imageView = 0;
         if (vkCreateImageView(device, &viewInfo, allocator, &imageView) != VK_SUCCESS)
         {
             RTC_LOG(LS_INFO) << "Failed vkCreateImageView";
-            return nullptr;
+            return 0;
         }
 
         return imageView;
