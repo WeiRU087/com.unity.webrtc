@@ -6,6 +6,7 @@ using System.Threading;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.Scripting;
 using Object = UnityEngine.Object;
 
 namespace Unity.WebRTC
@@ -189,6 +190,7 @@ namespace Unity.WebRTC
     /// Please check the <see cref="RTCIceServer.credentialType"> in the <see cref="RTCIceServer"/> struct.
     /// </summary>
     /// <seealso cref="RTCIceServer.credentialType"/>
+    [Preserve]
     public enum RTCIceCredentialType
     {
         Password,
@@ -199,6 +201,7 @@ namespace Unity.WebRTC
     ///
     /// </summary>
     /// <seealso cref="RTCConfiguration"/>
+    [Preserve]
     [Serializable]
     public struct RTCIceServer
     {
@@ -210,6 +213,15 @@ namespace Unity.WebRTC
         public string[] urls;
         [Tooltip("Optional: specifies the username to use when authenticating with the ICE server")]
         public string username;
+
+        [Preserve]
+        public RTCIceServer(string credential, RTCIceCredentialType credentialType, string[] urls, string username)
+        {
+            this.credential = credential;
+            this.credentialType = credentialType;
+            this.urls = urls;
+            this.username = username;
+        }
     }
 
     /// <summary>
