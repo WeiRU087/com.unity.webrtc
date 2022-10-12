@@ -62,9 +62,9 @@ namespace Unity.WebRTC.Editor
                 case BuildTarget.StandaloneOSX:
                     EnsureOSXArchitecture();
                     break;
-                case BuildTarget.StandaloneWindows:
-                    throw new BuildFailedException(
-                        "Windows 32bit(x86) architecture is not supported by WebRTC package.");
+                // case BuildTarget.StandaloneWindows:
+                //     throw new BuildFailedException(
+                //         "Windows 32bit(x86) architecture is not supported by WebRTC package.");
             }
         }
 

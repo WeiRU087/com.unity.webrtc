@@ -25,6 +25,24 @@
       }
     },
     {
+      "name": "default-windows-x86",
+      "displayName": "Default Windows Config",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "generator": "Visual Studio 16 2019",
+      "architecture": {
+        "value": "x86",
+        "strategy": "set"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [
+            "Windows"
+          ]
+        }
+      }
+    },
+    {
       "name": "default-macos",
       "displayName": "Default macOS Config",
       "hidden": true,
@@ -96,6 +114,17 @@
       "name": "x64-windows-msvc",
       "description": "Sets x64 arch, generator, compilers",
       "inherits": "default-windows"
+    },
+    {
+      "name": "x86-windows-clang",
+      "description": "Sets x86 arch, generator, compilers",
+      "toolset": "ClangCL",
+      "inherits": "default-windows-x86",
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "intelliSenseMode": "windows-clang-x86"
+        }
+      }      
     },
     {
       "name": "x64-windows-clang",
