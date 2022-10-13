@@ -11,10 +11,11 @@ set DEPOT_TOOLS_WIN_TOOLCHAIN=0
 set CPPFLAGS=/WX-
 set GYP_GENERATORS=ninja,msvs-ninja
 set GYP_MSVS_VERSION=2019
-set OUTPUT_DIR=out
-set ARTIFACTS_DIR=%cd%\artifacts
+set OUTPUT_DIR=out_264
+set ARTIFACTS_DIR=%cd%\artifacts_264
 set PYPI_URL=https://artifactory.prd.it.unity3d.com/artifactory/api/pypi/pypi/simple
 set vs2019_install=C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional
+
 
 if not exist src (
   powershell -Command "get-content depot_tools\update_depot_tools.bat | foreach-object {$_ -replace \"origin/master\",\"origin/main\"} | add-content depot_tools\update_depot_tools.bat.edited"
@@ -41,13 +42,22 @@ setlocal enabledelayedexpansion
 for %%i in (x64 x86) do (
   mkdir "%ARTIFACTS_DIR%/lib/%%i"
   for %%j in (true false) do (
+    
+    set filename=
+    set builddir=%OUTPUT_DIR%_%%i
+    if true==%%j (
+      set filename=webrtcd.lib
+      set builddir=%OUTPUT_DIR%_%%i_d
+    ) else (
+      set filename=webrtc.lib
+    )
 
     rem generate ninja for release
-    call gn.bat gen %OUTPUT_DIR% --root="src" ^
-      --args="is_debug=%%j is_clang=false target_cpu=\"%%i\" rtc_include_tests=false rtc_build_examples=false rtc_use_h264=false symbol_level=0 enable_iterator_debugging=false"
+    call gn.bat gen !builddir! --root="src" ^
+      --args="is_debug=%%j is_clang=true target_cpu=\"%%i\" use_custom_libcxx=false rtc_include_tests=false rtc_build_examples=false proprietary_codecs=true ffmpeg_branding=\"Chrome\" rtc_use_h264=true symbol_level=0 enable_iterator_debugging=false"
 
     rem build
-    ninja.exe -C %OUTPUT_DIR%
+    ninja.exe -C !builddir!
 
     set filename=
     if true==%%j (
@@ -55,9 +65,8 @@ for %%i in (x64 x86) do (
     ) else (
       set filename=webrtc.lib
     )
-
     rem copy static library for release build
-    copy "%OUTPUT_DIR%\obj\webrtc.lib" "%ARTIFACTS_DIR%\lib\%%i\!filename!"
+    copy "!builddir!\obj\webrtc.lib" "%ARTIFACTS_DIR%\lib\%%i\!filename!"
   )
 )
 
@@ -69,16 +78,16 @@ patch -N "%cd%\src\tools_webrtc\libs\generate_licenses.py" < ^
 
 rem generate license
 call python.bat "%cd%\src\tools_webrtc\libs\generate_licenses.py" ^
-  --target //:default %OUTPUT_DIR% %OUTPUT_DIR%
+  --target //:default %OUTPUT_DIR%_x64 %OUTPUT_DIR%_x64
 
 rem unescape license
-powershell -File "%COMMAND_DIR%\Unescape.ps1" "%OUTPUT_DIR%\LICENSE.md"
+powershell -File "%COMMAND_DIR%\Unescape.ps1" "%OUTPUT_DIR%_x64\LICENSE.md"
 
 rem copy header
 xcopy src\*.h "%ARTIFACTS_DIR%\include" /C /S /I /F /H
-
+                                                                                                                                             
 rem copy license
-copy "%OUTPUT_DIR%\LICENSE.md" "%ARTIFACTS_DIR%"
+copy "%OUTPUT_DIR%_x64\LICENSE.md" "%ARTIFACTS_DIR%"
 
 rem create zip
 cd %ARTIFACTS_DIR%
