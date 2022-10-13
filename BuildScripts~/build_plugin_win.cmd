@@ -14,4 +14,6 @@ echo Build com.unity.webrtc Plugin
 
 cd %SOLUTION_DIR%
 cmake --preset=x64-windows-clang
+@REM to build x86 support, toggle this comment
+@REM cmake --preset=x86-windows-clang
 cmake --build --preset=release-windows-clang --target=WebRTCPlugin
